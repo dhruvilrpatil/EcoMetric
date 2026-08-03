@@ -1,0 +1,52 @@
+# ── Secrets & Security Credentials (CRITICAL - DO NOT REMOVE) ──
+.env
+*.env
+.env.*
+!.env.example
+*.pem
+*.key
+serviceAccountKey.json
+**/serviceAccountKey.json
+firebase-adminsdk*.json
+
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+**/node_modules/
+.venv/
+**/venv/
+**/env/
+*.egg-info/
+
+# ── Build Artifacts ──────────────────────────────────────────
+dist/
+**/dist/
+build/
+.vite/
+**/.vite/
+
+# ── Python & Pytest Cache ─────────────────────────────────────
+__pycache__/
+/**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── One-off Scratch & Log Files ──────────────────────────────
+check.txt
+search_results*.json
+scratch_*.py
+fetch_test.py
+rename.py
+*.log
+
+# ── IDE & OS Files ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# ── Generated Output PDFs ─────────────────────────────────────
+backend/outputs/
+*.pdf

@@ -1,0 +1,425 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════════
+   EcoMetric Global Base Styles
+   All tokens map directly to PRD Section 4 design system.
+   Never override these with inline styles or arbitrary Tailwind values.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── CSS custom properties ──────────────── */
+
+:root {
+  /* §4.1 Color Tokens */
+  --color-primary:            #76b900;
+  --color-primary-dark:       #5a8d00;
+  --color-accent-green-pale:  #bff230;
+
+  --color-ink:                #000000;
+  --color-canvas:             #ffffff;
+  --color-surface-dark:       #000000;
+  --color-surface-soft:       #f7f7f7;
+  --color-surface-elevated:   #1a1a1a;
+  --color-hairline:           #cccccc;
+  --color-hairline-strong:    #5e5e5e;
+
+  --color-body:               #1a1a1a;
+  --color-mute:               #757575;
+  --color-stone:              #898989;
+  --color-ash:                #a7a7a7;
+  --color-on-dark:            #ffffff;
+  --color-on-dark-mute:       rgba(255,255,255,0.7);
+  --color-on-primary:         #000000;
+  --color-link-blue:          #0046a4;
+
+  --color-error:              #e52020;
+  --color-error-deep:         #650b0b;
+  --color-warning:            #df6500;
+  --color-warning-bright:     #ef9100;
+  --color-success-deep:       #3f8500;
+
+  --color-accent-purple:      #952fc6;
+  --color-accent-purple-pale: #f9d4ff;
+  --color-accent-yellow-pale: #feeeb2;
+
+  /* §4.3 Spacing Tokens */
+  --spacing-xxs:     2px;
+  --spacing-xs:      4px;
+  --spacing-sm:      8px;
+  --spacing-md:      12px;
+  --spacing-lg:      16px;
+  --spacing-xl:      24px;
+  --spacing-xxl:     32px;
+  --spacing-section: 64px;
+  --spacing-hero-v:  80px;
+  --spacing-hero-h:  48px;
+
+  /* §4.4 Border Radius Tokens */
+  --radius-none: 0px;
+  --radius-xs:   1px;
+  --radius-sm:   2px;
+  --radius-full: 9999px;
+}
+
+/* ── Base layer resets ──────────────────────────────────────────── */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Inter', 'Arial', 'Helvetica', sans-serif;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-body);
+    line-height: 1.5;
+  }
+
+  /* ── PRD CRITICAL RULE: Focus state = 2px solid #76b900 on ALL focusables ── */
+  *:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* Remove default focus for mouse users but keep for keyboard */
+  *:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* ── Headings inherit from Inter ── */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Inter', 'Arial', 'Helvetica', sans-serif;
+    margin: 0;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  a {
+    color: var(--color-link-blue);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  img, svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  button {
+    cursor: pointer;
+    font-family: inherit;
+    border: none;
+    background: none;
+    padding: 0;
+  }
+
+  input, textarea, select {
+    font-family: inherit;
+  }
+
+  /* PRD §4.6 — tables must never slice across page breaks */
+  table {
+    border-collapse: collapse;
+    page-break-inside: avoid;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+}
+
+/* ── Component layer — PRD §4.6 component specs as utility classes ── */
+@layer components {
+
+  /* ── Buttons ──────────────────────────────────────────────────── */
+
+  /* button-primary: green fill, 44px height, 2px radius */
+  .btn-primary {
+    @apply inline-flex items-center justify-center;
+    @apply h-btn-lg min-w-touch;
+    @apply px-xl py-[11px];
+    @apply bg-primary text-on-primary;
+    @apply text-button-md font-bold;
+    @apply rounded-sm;
+    @apply transition-colors duration-fast;
+    border: none;
+  }
+  .btn-primary:hover {
+    @apply bg-primary-dark;
+  }
+  .btn-primary:active {
+    background-color: var(--color-primary-dark);
+  }
+  .btn-primary:disabled,
+  .btn-primary[aria-disabled="true"] {
+    @apply bg-surface-soft text-ash cursor-not-allowed;
+  }
+
+  /* button-outline: transparent bg, green border, 44px height */
+  .btn-outline {
+    @apply inline-flex items-center justify-center;
+    @apply h-btn-lg min-w-touch;
+    @apply px-lg py-[11px];
+    @apply bg-transparent text-ink;
+    @apply text-button-md font-bold;
+    @apply border-2 border-primary rounded-sm;
+    @apply transition-colors duration-fast;
+  }
+  .btn-outline:hover {
+    @apply bg-primary/10;
+  }
+
+  /* button-outline-on-dark: for use on surface-dark backgrounds */
+  .btn-outline-dark {
+    @apply inline-flex items-center justify-center;
+    @apply h-btn-lg min-w-touch;
+    @apply px-lg py-[11px];
+    @apply bg-transparent text-on-dark;
+    @apply text-button-md font-bold;
+    @apply border border-on-dark rounded-sm;
+    @apply transition-colors duration-fast;
+  }
+  .btn-outline-dark:hover {
+    @apply bg-white/10;
+  }
+
+  /* button-ghost-link: transparent, green text, no border */
+  .btn-ghost {
+    @apply inline-flex items-center gap-xs;
+    @apply bg-transparent text-primary;
+    @apply text-button-md font-bold;
+    @apply transition-colors duration-fast;
+    border-radius: 0;
+    border: none;
+    padding: 0;
+    min-height: 44px; /* touch target */
+  }
+  .btn-ghost:hover {
+    @apply text-primary-dark;
+  }
+
+  /* button-disabled */
+  .btn-disabled {
+    @apply inline-flex items-center justify-center;
+    @apply h-btn-lg min-w-touch;
+    @apply px-xl py-[11px];
+    @apply bg-surface-soft text-ash;
+    @apply text-button-md font-bold;
+    @apply rounded-sm cursor-not-allowed;
+    border: none;
+  }
+
+  /* ── Tabs & Chips ─────────────────────────────────────────────── */
+
+  /* pill-tab: transparent bg, 2px radius */
+  .pill-tab {
+    @apply inline-flex items-center justify-center;
+    @apply px-[18px] py-[10px];
+    @apply bg-transparent text-ink;
+    @apply text-button-sm font-bold uppercase tracking-button-sm;
+    @apply rounded-sm;
+    @apply transition-colors duration-fast;
+    @apply min-h-touch min-w-touch;
+  }
+  .pill-tab:hover {
+    @apply bg-surface-soft;
+  }
+
+  /* pill-tab-active: black bg, white text */
+  .pill-tab-active {
+    @apply inline-flex items-center justify-center;
+    @apply px-[18px] py-[10px];
+    @apply bg-ink text-on-dark;
+    @apply text-button-sm font-bold uppercase tracking-button-sm;
+    @apply rounded-sm;
+    @apply min-h-touch min-w-touch;
+  }
+
+  /* badge-tag: light grey bg, uppercase caption */
+  .badge-tag {
+    @apply inline-flex items-center;
+    @apply px-[10px] py-xs;
+    @apply bg-surface-soft text-body;
+    @apply text-caption-md font-bold uppercase;
+    @apply rounded-sm;
+  }
+
+  /* ── Inputs ───────────────────────────────────────────────────── */
+
+  .text-input {
+    @apply w-full h-btn-lg px-lg;
+    @apply bg-canvas text-ink;
+    @apply border border-hairline rounded-sm;
+    @apply text-body-md;
+    @apply transition-all duration-fast;
+    @apply placeholder:text-stone;
+  }
+  .text-input:focus {
+    @apply outline-none border-2 border-primary;
+  }
+
+  .search-input {
+    @apply w-full px-lg;
+    @apply bg-canvas text-ink;
+    @apply border border-hairline rounded-sm;
+    @apply text-body-md;
+    @apply transition-all duration-fast;
+    @apply placeholder:text-stone;
+    height: 40px;
+  }
+  .search-input:focus {
+    @apply outline-none border-2 border-primary;
+  }
+
+  /* ── Cards ────────────────────────────────────────────────────── */
+
+  /* Base card — hairline border, 2px radius, NO shadow */
+  .card {
+    @apply relative bg-canvas border border-hairline rounded-sm;
+  }
+
+  /* product-card: 24px padding, corner square top-left */
+  .product-card {
+    @apply card p-xl;
+  }
+
+  /* feature-card: 32px padding, icon + heading + body */
+  .feature-card {
+    @apply card p-xxl;
+  }
+
+  /* resource-card: 24px padding, badge + thumbnail */
+  .resource-card {
+    @apply card p-xl;
+  }
+
+  /* callout-stat: 32px padding, large green number */
+  .callout-stat {
+    @apply card p-xxl;
+  }
+
+  /* ── Corner Square — PRD §4.6 Decorative Corner Square ──────── */
+  /* 12×12px on standard cards, 16×16px on hero callouts */
+  /* Color: #76b900, radius: 0px */
+  /* Anchored to top-left OR bottom-right — never both */
+
+  .corner-sq {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background-color: var(--color-primary);
+    border-radius: 0;
+  }
+  .corner-sq-lg {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background-color: var(--color-primary);
+    border-radius: 0;
+  }
+  .corner-sq-tl { top: 0; left: 0; }
+  .corner-sq-br { bottom: 0; right: 0; }
+
+  /* ── Navigation Chrome ────────────────────────────────────────── */
+
+  .utility-bar {
+    @apply h-utility-bar bg-surface-dark text-on-dark;
+    @apply flex items-center px-xl;
+    @apply text-caption-xs font-bold uppercase;
+  }
+
+  .primary-nav {
+    @apply h-primary-nav bg-surface-dark text-on-dark;
+    @apply flex items-center px-xl;
+    @apply sticky top-0 z-nav shadow-nav;
+  }
+
+  .breadcrumb-bar {
+    @apply h-breadcrumb-bar bg-surface-soft text-body;
+    @apply flex items-center px-xl;
+    @apply text-caption-md font-bold uppercase;
+    @apply border-b border-hairline;
+  }
+
+  .sub-nav-strip {
+    @apply h-sub-nav-strip bg-surface-soft text-ink;
+    @apply flex items-center px-xl gap-xs;
+    @apply border-b border-hairline;
+    @apply sticky top-[64px] z-nav;
+  }
+
+  /* ── Section rhythm ──────────────────────────────────────────── */
+  /* Alternate dark/white sections per PRD §4.7 */
+  .section-dark {
+    @apply bg-surface-dark text-on-dark py-hero-v px-hero-h;
+  }
+
+  .section-light {
+    @apply bg-canvas text-body py-section px-hero-h;
+  }
+
+  /* ── Loading states ──────────────────────────────────────────── */
+  .loading-overlay {
+    @apply fixed inset-0 bg-surface-dark z-overlay;
+    @apply flex flex-col items-center justify-center;
+    @apply text-on-dark;
+  }
+
+  /* ── Error / notification inline card (never browser alert) ─── */
+  .notification-card {
+    @apply card px-xl py-lg;
+    @apply flex items-start gap-md;
+  }
+  .notification-error {
+    @apply notification-card border-error bg-error/5;
+  }
+  .notification-warning {
+    @apply notification-card;
+    background-color: var(--color-accent-yellow-pale);
+    @apply border-warning;
+  }
+  .notification-success {
+    @apply notification-card border-primary bg-primary/5;
+  }
+}
+
+/* ── Utility layer additions ─────────────────────────────────────── */
+@layer utilities {
+  /* Page rhythm sections — spacing-section gap between all major blocks */
+  .gap-section { gap: var(--spacing-section); }
+
+  /* Table: page-break-inside avoid — PDF export rule */
+  .no-page-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Scientific notation cell display */
+  .sci-notation {
+    font-variant-numeric: tabular-nums;
+    @apply text-caption-sm font-normal;
+  }
+
+  /* Scrollbar styling — minimal, non-obtrusive */
+  .scrollbar-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: var(--color-surface-soft); }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--color-ash); border-radius: 2px; }
+}
