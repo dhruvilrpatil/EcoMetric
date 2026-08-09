@@ -20,7 +20,7 @@ import { NotificationCard } from '@/components/molecules/NotificationCard'
 
 export default function PublishPage() {
   const { id } = useParams()
-  
+
   const [verifierEmail, setVerifierEmail] = useState('')
   const [inviteSent, setInviteSent] = useState(false)
 
@@ -37,7 +37,7 @@ export default function PublishPage() {
   const projectNav = {
     projectId: id || 'new',
     currentStep: 7 as const,
-    highestCompletedStep: 6 as const, 
+    highestCompletedStep: 6 as const,
   }
 
   const handleSendInvite = (e: React.FormEvent) => {
@@ -52,7 +52,7 @@ export default function PublishPage() {
   return (
     <AppLayout breadcrumbs={breadcrumbs} projectNav={projectNav}>
       <div className="w-full max-w-content-max mx-auto px-hero-h py-section">
-        
+
         <div className="mb-xl">
           <h1 className="text-heading-lg text-ink">Publish & Verification</h1>
           <p className="text-body-md text-mute mt-xxs">
@@ -69,17 +69,17 @@ export default function PublishPage() {
         )}
 
         <div className="grid grid-cols-1 tablet:grid-cols-2 gap-lg">
-          
+
           {/* Verifier Access Panel */}
           <div className="bg-white border border-hairline rounded-sm p-xl flex flex-col h-full">
             <h2 className="text-heading-md text-ink mb-md">Share with Verifier</h2>
             <p className="text-body-sm text-mute mb-lg">
               Grant read-only access to all calculations down to the elementary exchange level for third-party auditing.
             </p>
-            
+
             <form onSubmit={handleSendInvite} className="flex gap-md mb-xl mt-auto">
               <div className="flex-1">
-                <TextInput 
+                <TextInput
                   label="Verifier Email Address"
                   type="email"
                   placeholder="verifier@agency.com"

@@ -54,13 +54,16 @@ async def start_calculation(
         (str(uuid.uuid4()), project_id, run_id),
     )
 
-    # Try dispatching via Celery, fall back to background task
-    try:
-        from tasks.lca_compute_v2 import run_full_lca
-        run_full_lca.delay(project_id, run_id)
-        dispatch_mode = "celery"
-    except Exception:
-        # Run synchronously in background without blocking the HTTP response
+    use_celery = os.getenv("USE_CELERY", "false").lower() == "true"
+    if use_celery:
+        try:
+            from tasks.lca_compute_v2 import run_full_lca
+            run_full_lca.delay(project_id, run_id)
+            dispatch_mode = "celery"
+        except Exception:
+            background_tasks.add_task(_run_lca_sync, project_id, run_id)
+            dispatch_mode = "background"
+    else:
         background_tasks.add_task(_run_lca_sync, project_id, run_id)
         dispatch_mode = "background"
 
@@ -128,6 +131,9 @@ async def get_job_status(
             "carbon_footprint_kg_co2e": row_dict.get("carbon_footprint_kg_co2e"),
             "gwp_total": row_dict.get("gwp_total_kg_co2e"),
         }
+
+    # Still running (is_final = False means computation wrote initial row but hasn't finished)
+    return {"status": "running", "progress": 50, "job_id": job_id}
 
     # Still running (is_final = False means computation wrote initial row but hasn't finished)
     return {"status": "running", "progress": 50, "job_id": job_id}

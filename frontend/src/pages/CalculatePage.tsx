@@ -35,9 +35,9 @@ export default function CalculatePage() {
 
   const jobState: 'idle' | 'running' | 'complete' | 'failed' =
     currentStatus === 'complete' ? 'complete'
-    : currentStatus === 'failed' ? 'failed'
-    : currentStatus === 'running' ? 'running'
-    : 'idle'
+      : currentStatus === 'failed' ? 'failed'
+        : currentStatus === 'running' ? 'running'
+          : 'idle'
 
   const progress = jobStatus?.progress ?? (persistedResult ? (persistedResult.is_final ? 100 : 50) : started ? 5 : 0)
 

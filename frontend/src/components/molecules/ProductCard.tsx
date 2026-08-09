@@ -18,17 +18,17 @@ import type { ProjectStatus, ProjectStep } from '@/types'
 
 // Map PRD project status to badge display text and color
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  draft:                'DRAFT',
-  in_progress:          'IN PROGRESS',
+  draft: 'DRAFT',
+  in_progress: 'IN PROGRESS',
   pending_verification: 'PENDING VERIFICATION',
-  published:            'PUBLISHED',
+  published: 'PUBLISHED',
 }
 
 const STATUS_COLOR: Record<ProjectStatus, BadgeTagColor> = {
-  draft:                'default',
-  in_progress:          'info',
+  draft: 'default',
+  in_progress: 'info',
   pending_verification: 'warning',
-  published:            'success',
+  published: 'success',
 }
 
 export interface ProductCardProps {

@@ -8,9 +8,10 @@
  * 4. End-of-Life Scenarios (C1–C4)
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useProject } from '@/hooks/useProjects'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faPlus,
@@ -103,6 +104,7 @@ export default function InventoryPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { data: project } = useProject(id)
 
   const activeTab = (searchParams.get('tab') as 'bom' | 'manufacturing' | 'use_phase' | 'end_of_life') || 'bom'
 
@@ -117,9 +119,27 @@ export default function InventoryPage() {
   const [manufacturing, setManufacturing] = useState({
     electricity_use_kwh: 450.0,
     electricity_grid_region: 'US',
+    natural_gas_consumption_mj: 0,
+    diesel_consumption_mj: 0,
+    manufacturing_waste_kg: 0,
+    manufacturing_waste_disposal_route: 'recycling',
+    scrap_generated_kg: 0,
+    scrap_recycling_rate_pct: 100,
+    process_water_consumption_m3: 0,
+    compressed_air_energy_mj: 0,
+    compressed_air_already_in_electricity: false,
+    process_emissions: [] as Array<{ id: string; substance_name: string; emission_kg: number }>,
     manufacturing_energy_mj: 1200.0,
     assembly_process_desc: 'Robotic welding, precision machining, and automated quality testing',
   })
+
+  const totalBomMass = useMemo(() => {
+    return (bom || []).reduce((acc, item) => acc + (Number(item.quantity || (item as any).mass_kg) || 0), 0)
+  }, [bom])
+
+  const fuQuantity = Number(project?.functional_unit_quantity) || 1
+  const fuUnit = project?.functional_unit_unit || 'unit'
+  const conversionFactor = fuQuantity > 0 ? totalBomMass / fuQuantity : 0
 
   const [usePhase, setUsePhase] = useState({
     annual_electricity_kwh: 12500.0,
@@ -179,6 +199,16 @@ export default function InventoryPage() {
             ...prev,
             electricity_use_kwh: Number(res.manufacturing.electricity_use_kwh ?? prev.electricity_use_kwh),
             electricity_grid_region: res.manufacturing.electricity_grid_region || prev.electricity_grid_region,
+            natural_gas_consumption_mj: Number(res.manufacturing.natural_gas_consumption_mj ?? prev.natural_gas_consumption_mj),
+            diesel_consumption_mj: Number(res.manufacturing.diesel_consumption_mj ?? prev.diesel_consumption_mj),
+            manufacturing_waste_kg: Number(res.manufacturing.manufacturing_waste_kg ?? prev.manufacturing_waste_kg),
+            manufacturing_waste_disposal_route: res.manufacturing.manufacturing_waste_disposal_route || prev.manufacturing_waste_disposal_route,
+            scrap_generated_kg: Number(res.manufacturing.scrap_generated_kg ?? prev.scrap_generated_kg),
+            scrap_recycling_rate_pct: Number(res.manufacturing.scrap_recycling_rate_pct ?? prev.scrap_recycling_rate_pct),
+            process_water_consumption_m3: Number(res.manufacturing.process_water_consumption_m3 ?? prev.process_water_consumption_m3),
+            compressed_air_energy_mj: Number(res.manufacturing.compressed_air_energy_mj ?? prev.compressed_air_energy_mj),
+            compressed_air_already_in_electricity: Boolean(res.manufacturing.compressed_air_already_in_electricity ?? prev.compressed_air_already_in_electricity),
+            process_emissions: Array.isArray(res.manufacturing.process_emissions) ? res.manufacturing.process_emissions : prev.process_emissions,
             manufacturing_energy_mj: Number(res.manufacturing.manufacturing_energy_mj ?? prev.manufacturing_energy_mj),
             assembly_process_desc: res.manufacturing.assembly_process_desc || prev.assembly_process_desc,
           }))
@@ -204,7 +234,7 @@ export default function InventoryPage() {
           }))
         }
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [id])
 
   const breadcrumbs = [
@@ -348,9 +378,8 @@ export default function InventoryPage() {
         {/* Top Sub-Navigation Tabs Bar */}
         <div className="flex border border-hairline mb-xl bg-white rounded-sm p-xs shadow-sm gap-xs flex-wrap">
           <button
-            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${
-              activeTab === 'bom' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
-            }`}
+            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${activeTab === 'bom' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
+              }`}
             onClick={() => setSearchParams({ tab: 'bom' })}
           >
             <FontAwesomeIcon icon={faBoxes} />
@@ -358,9 +387,8 @@ export default function InventoryPage() {
           </button>
 
           <button
-            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${
-              activeTab === 'manufacturing' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
-            }`}
+            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${activeTab === 'manufacturing' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
+              }`}
             onClick={() => setSearchParams({ tab: 'manufacturing' })}
           >
             <FontAwesomeIcon icon={faBolt} />
@@ -368,9 +396,8 @@ export default function InventoryPage() {
           </button>
 
           <button
-            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${
-              activeTab === 'use_phase' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
-            }`}
+            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${activeTab === 'use_phase' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
+              }`}
             onClick={() => setSearchParams({ tab: 'use_phase' })}
           >
             <FontAwesomeIcon icon={faPlug} />
@@ -378,9 +405,8 @@ export default function InventoryPage() {
           </button>
 
           <button
-            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${
-              activeTab === 'end_of_life' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
-            }`}
+            className={`flex-1 py-md px-md rounded-sm font-semibold text-body-sm flex items-center justify-center gap-xs transition-all ${activeTab === 'end_of_life' ? 'bg-primary text-white shadow-sm' : 'text-mute hover:bg-surface-soft hover:text-ink'
+              }`}
             onClick={() => setSearchParams({ tab: 'end_of_life' })}
           >
             <FontAwesomeIcon icon={faRecycle} />
@@ -394,7 +420,7 @@ export default function InventoryPage() {
 
             {/* LEFT PANE: Search / NLP scan */}
             <div className="flex-1 border border-hairline rounded-sm bg-white overflow-hidden flex flex-col h-[750px]">
-              
+
               {/* Header Tabs */}
               <div className="flex border-b border-hairline bg-surface-soft">
                 <button
@@ -712,7 +738,7 @@ export default function InventoryPage() {
           </div>
         )}
 
-        {/* TAB 2: MANUFACTURING ENERGY */}
+        {/* TAB 2: MANUFACTURING ENERGY & PROCESSES */}
         {activeTab === 'manufacturing' && (
           <div className="bg-white border border-hairline rounded-sm p-xl shadow-card space-y-xl">
             <div>
@@ -721,62 +747,254 @@ export default function InventoryPage() {
                 Module A3: Manufacturing Energy &amp; Facility Operations
               </h2>
               <p className="text-body-sm text-mute mt-xs">
-                Configure direct energy inputs, electricity grid mix, and process parameters for factory operations.
+                Configure direct energy inputs, waste &amp; scrap handling, water usage, compressed air, and process emissions for factory operations.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 tablet:grid-cols-2 gap-xl">
-              <div>
+            {/* Read-Only Callout: Functional Unit Details */}
+            <div className="bg-surface-soft border border-hairline rounded-sm p-md space-y-sm">
+              <h3 className="text-body-strong font-bold text-ink text-body-sm">Functional Unit Details (Auto-Calculated)</h3>
+              <div className="grid grid-cols-1 tablet:grid-cols-2 gap-md">
+                <div className="bg-white p-sm border border-hairline rounded-sm">
+                  <span className="text-caption-sm text-mute block font-medium">Mass of one delivered product</span>
+                  <span className="text-heading-sm font-bold text-ink font-mono">{totalBomMass.toFixed(2)} kg</span>
+                  <p className="text-caption-sm text-mute mt-xs">Sum of all Bill of Materials entries</p>
+                </div>
+                <div className="bg-white p-sm border border-hairline rounded-sm">
+                  <span className="text-caption-sm text-mute block font-medium">Conversion factor</span>
+                  <span className="text-heading-sm font-bold text-ink font-mono">{conversionFactor.toFixed(4)} kg/{fuUnit}</span>
+                  <p className="text-caption-sm text-mute mt-xs">Auto-calculated: mass ÷ functional unit quantity. Updates automatically if BOM changes.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 1: Manufacturing Energy */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h3 className="text-body-strong font-bold text-ink">Manufacturing Energy</h3>
+              <div className="grid grid-cols-1 tablet:grid-cols-2 gap-xl">
+                <div>
+                  <TextInput
+                    label="Electricity Consumption (kWh)"
+                    type="number"
+                    value={manufacturing.electricity_use_kwh}
+                    onChange={(e) => setManufacturing({ ...manufacturing, electricity_use_kwh: parseFloat(e.target.value) || 0 })}
+                    hint="Total electricity consumed per functional unit during manufacturing."
+                  />
+                </div>
+
+                <div>
+                  <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
+                    Electricity Grid Mix Region
+                  </label>
+                  <select
+                    value={manufacturing.electricity_grid_region}
+                    onChange={(e) => setManufacturing({ ...manufacturing, electricity_grid_region: e.target.value })}
+                    className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white font-medium"
+                  >
+                    <option value="US">🇺🇸 United States (NERC Mix)</option>
+                    <option value="GLO">🌍 Global Average (GLO)</option>
+                    <option value="DE">🇩🇪 Germany (DE)</option>
+                    <option value="FR">🇫🇷 France (FR - Low Carbon Nuclear)</option>
+                    <option value="CN">🇨🇳 China (CN)</option>
+                    <option value="UK">🇬🇧 United Kingdom (UK)</option>
+                    <option value="JP">🇯🇵 Japan (JP)</option>
+                  </select>
+                  <p className="text-caption-sm text-mute mt-xs">Determines carbon intensity factor for Module A3 grid electricity.</p>
+                </div>
+
+                <div>
+                  <TextInput
+                    label="Natural Gas Consumption (MJ)"
+                    type="number"
+                    value={manufacturing.natural_gas_consumption_mj}
+                    onChange={(e) => setManufacturing({ ...manufacturing, natural_gas_consumption_mj: parseFloat(e.target.value) || 0 })}
+                    hint="Natural gas fuel energy consumed in factory thermal equipment."
+                  />
+                </div>
+
+                <div>
+                  <TextInput
+                    label="Diesel Consumption (MJ)"
+                    type="number"
+                    value={manufacturing.diesel_consumption_mj}
+                    onChange={(e) => setManufacturing({ ...manufacturing, diesel_consumption_mj: parseFloat(e.target.value) || 0 })}
+                    hint="Diesel used in on-site manufacturing equipment only (excluding crane/installation diesel)."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Manufacturing Waste & Scrap */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h3 className="text-body-strong font-bold text-ink">Manufacturing Waste &amp; Scrap</h3>
+              <div className="grid grid-cols-1 tablet:grid-cols-2 gap-xl">
+                <div>
+                  <TextInput
+                    label="Manufacturing Waste (kg)"
+                    type="number"
+                    value={manufacturing.manufacturing_waste_kg}
+                    onChange={(e) => setManufacturing({ ...manufacturing, manufacturing_waste_kg: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
+                    Waste Disposal Route
+                  </label>
+                  <select
+                    value={manufacturing.manufacturing_waste_disposal_route}
+                    onChange={(e) => setManufacturing({ ...manufacturing, manufacturing_waste_disposal_route: e.target.value })}
+                    className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white font-medium"
+                  >
+                    <option value="landfill">Landfill</option>
+                    <option value="incineration">Incineration</option>
+                    <option value="recycling">Recycling</option>
+                    <option value="mixed">Mixed Waste Treatment</option>
+                  </select>
+                </div>
+
+                <div>
+                  <TextInput
+                    label="Scrap Generated (kg)"
+                    type="number"
+                    value={manufacturing.scrap_generated_kg}
+                    onChange={(e) => setManufacturing({ ...manufacturing, scrap_generated_kg: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div>
+                  <TextInput
+                    label="Scrap Recycling Rate (%)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={manufacturing.scrap_recycling_rate_pct}
+                    onChange={(e) => setManufacturing({ ...manufacturing, scrap_recycling_rate_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Process Water */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h3 className="text-body-strong font-bold text-ink">Process Water</h3>
+              <div className="max-w-md">
                 <TextInput
-                  label="Electricity Consumption (kWh / functional unit)"
+                  label="Process Water Consumption (m³)"
                   type="number"
-                  value={manufacturing.electricity_use_kwh}
-                  onChange={(e) => setManufacturing({ ...manufacturing, electricity_use_kwh: parseFloat(e.target.value) || 0 })}
-                  hint="Total electricity consumed per functional unit during manufacturing."
+                  value={manufacturing.process_water_consumption_m3}
+                  onChange={(e) => setManufacturing({ ...manufacturing, process_water_consumption_m3: parseFloat(e.target.value) || 0 })}
                 />
               </div>
+            </div>
 
-              <div>
-                <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
-                  Electricity Grid Mix Region
-                </label>
-                <select
-                  value={manufacturing.electricity_grid_region}
-                  onChange={(e) => setManufacturing({ ...manufacturing, electricity_grid_region: e.target.value })}
-                  className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white font-medium"
+            {/* Section 4: Compressed Air (Optional) */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h3 className="text-body-strong font-bold text-ink">Compressed Air (Optional)</h3>
+              <div className="p-sm bg-amber-50 border border-amber-200 rounded-sm text-body-sm text-amber-900">
+                ⚠️ Only complete this field if compressed air energy is NOT already included in your total electricity consumption above. Most compressors run on electricity already captured there — adding this separately risks double-counting.
+              </div>
+              <div className="grid grid-cols-1 tablet:grid-cols-2 gap-xl items-end">
+                <div>
+                  <TextInput
+                    label="Compressed Air Energy (MJ)"
+                    type="number"
+                    value={manufacturing.compressed_air_energy_mj}
+                    onChange={(e) => setManufacturing({ ...manufacturing, compressed_air_energy_mj: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <div className="flex items-center gap-xs pb-xs">
+                  <input
+                    type="checkbox"
+                    id="compressed_air_confirm"
+                    checked={manufacturing.compressed_air_already_in_electricity}
+                    onChange={(e) => setManufacturing({ ...manufacturing, compressed_air_already_in_electricity: e.target.checked })}
+                    className="w-4 h-4 text-primary rounded border-hairline"
+                  />
+                  <label htmlFor="compressed_air_confirm" className="text-body-sm text-ink font-medium">
+                    I confirm this is NOT already included in my electricity consumption figure
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 5: Process Emissions (Optional) */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <div className="flex items-center justify-between">
+                <h3 className="text-body-strong font-bold text-ink">Process Emissions (Optional)</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setManufacturing({
+                      ...manufacturing,
+                      process_emissions: [
+                        ...manufacturing.process_emissions,
+                        { id: String(Date.now()), substance_name: '', emission_kg: 0 },
+                      ],
+                    })
+                  }
                 >
-                  <option value="US">🇺🇸 United States (NERC Mix)</option>
-                  <option value="GLO">🌍 Global Average (GLO)</option>
-                  <option value="DE">🇩🇪 Germany (DE)</option>
-                  <option value="FR">🇫🇷 France (FR - Low Carbon Nuclear)</option>
-                  <option value="CN">🇨🇳 China (CN)</option>
-                  <option value="UK">🇬🇧 United Kingdom (UK)</option>
-                  <option value="JP">🇯🇵 Japan (JP)</option>
-                </select>
-                <p className="text-caption-sm text-mute mt-xs">Determines carbon intensity factor for Module A3 grid electricity.</p>
+                  + Add Process Emission
+                </Button>
               </div>
 
-              <div>
-                <TextInput
-                  label="Thermal &amp; Process Energy (MJ / functional unit)"
-                  type="number"
-                  value={manufacturing.manufacturing_energy_mj}
-                  onChange={(e) => setManufacturing({ ...manufacturing, manufacturing_energy_mj: parseFloat(e.target.value) || 0 })}
-                  hint="Natural gas, steam, or thermal fuel energy utilized in assembly."
-                />
-              </div>
+              {manufacturing.process_emissions.length === 0 ? (
+                <p className="text-caption-sm text-mute italic">No direct process emissions specified.</p>
+              ) : (
+                <div className="space-y-xs">
+                  {manufacturing.process_emissions.map((item, idx) => (
+                    <div key={item.id || idx} className="flex items-center gap-md bg-surface-soft p-xs rounded-sm">
+                      <div className="flex-1">
+                        <TextInput
+                          label="Substance Name"
+                          value={item.substance_name}
+                          onChange={(e) => {
+                            const updated = [...manufacturing.process_emissions]
+                            updated[idx].substance_name = e.target.value
+                            setManufacturing({ ...manufacturing, process_emissions: updated })
+                          }}
+                        />
+                      </div>
+                      <div className="w-32">
+                        <TextInput
+                          label="Emission (kg)"
+                          type="number"
+                          value={item.emission_kg}
+                          onChange={(e) => {
+                            const updated = [...manufacturing.process_emissions]
+                            updated[idx].emission_kg = parseFloat(e.target.value) || 0
+                            setManufacturing({ ...manufacturing, process_emissions: updated })
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="text-mute hover:text-error text-xs p-xs mt-md"
+                        onClick={() => {
+                          const updated = manufacturing.process_emissions.filter((_, i) => i !== idx)
+                          setManufacturing({ ...manufacturing, process_emissions: updated })
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
-              <div>
-                <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
-                  Assembly &amp; Fabrication Process Summary
-                </label>
-                <textarea
-                  value={manufacturing.assembly_process_desc}
-                  onChange={(e) => setManufacturing({ ...manufacturing, assembly_process_desc: e.target.value })}
-                  className="w-full border border-hairline rounded-sm p-sm text-body-sm h-[90px]"
-                  placeholder="Describe machining, welding, casting, or assembly processes..."
-                />
-              </div>
+            {/* Section 6: Assembly Summary */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
+                Assembly &amp; Fabrication Process Summary
+              </label>
+              <textarea
+                value={manufacturing.assembly_process_desc}
+                onChange={(e) => setManufacturing({ ...manufacturing, assembly_process_desc: e.target.value })}
+                className="w-full border border-hairline rounded-sm p-sm text-body-sm h-[90px]"
+                placeholder="Describe machining, welding, casting, or assembly processes..."
+              />
             </div>
 
             <div className="flex justify-end gap-md pt-md border-t border-hairline">
@@ -900,9 +1118,8 @@ export default function InventoryPage() {
               </p>
             </div>
 
-            <div className={`p-md rounded-sm border text-body-sm font-semibold flex items-center justify-between ${
-              eolSum === 100 ? 'bg-green-50 border-green-300 text-green-900' : 'bg-amber-50 border-amber-300 text-amber-900'
-            }`}>
+            <div className={`p-md rounded-sm border text-body-sm font-semibold flex items-center justify-between ${eolSum === 100 ? 'bg-green-50 border-green-300 text-green-900' : 'bg-amber-50 border-amber-300 text-amber-900'
+              }`}>
               <span>Total Waste Disposition Routing: <strong>{eolSum}%</strong></span>
               <span>{eolSum === 100 ? '✓ Validated (Sum equals 100%)' : '⚠️ Routing percentages must sum to exactly 100%'}</span>
             </div>

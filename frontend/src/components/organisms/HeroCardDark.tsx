@@ -24,17 +24,17 @@ import type { ReactNode } from 'react'
 function SupplyChainSVG() {
   // Nodes: 6 circles representing stages of supply chain
   const nodes = [
-    { id: 'raw',   x: 80,  y: 160, label: 'Raw\nMaterials' },
-    { id: 'mfg',   x: 240, y: 80,  label: 'Manufacturing' },
+    { id: 'raw', x: 80, y: 160, label: 'Raw\nMaterials' },
+    { id: 'mfg', x: 240, y: 80, label: 'Manufacturing' },
     { id: 'trans', x: 400, y: 160, label: 'Transport' },
-    { id: 'use',   x: 240, y: 240, label: 'Use' },
-    { id: 'eol',   x: 80,  y: 320, label: 'End of\nLife' },
-    { id: 'epd',   x: 400, y: 320, label: 'EPD\nOutput' },
+    { id: 'use', x: 240, y: 240, label: 'Use' },
+    { id: 'eol', x: 80, y: 320, label: 'End of\nLife' },
+    { id: 'epd', x: 400, y: 320, label: 'EPD\nOutput' },
   ]
 
   const edges = [
     ['raw', 'mfg'], ['mfg', 'trans'], ['trans', 'use'],
-    ['use', 'eol'], ['eol', 'epd'],   ['raw', 'eol'],
+    ['use', 'eol'], ['eol', 'epd'], ['raw', 'eol'],
     ['mfg', 'use'], ['trans', 'epd'],
   ]
 

@@ -105,7 +105,7 @@ export default function HotspotsPage() {
 
   const gwpModuleData = parseModuleValues(result.gwp_total_kg_co2e)
   const hotspotsList = parseHotspots(result.hotspots)
-  const totalGwp = result.carbon_footprint_kg_co2e ?? 0
+  const totalGwp = Number(result.carbon_footprint_kg_co2e ?? 0)
 
   // Pie data: top modules by absolute GWP contribution
   const pieData = gwpModuleData.slice(0, 6).map(d => ({
@@ -115,11 +115,11 @@ export default function HotspotsPage() {
   }))
 
   const penreTotal = typeof result.penre_mj === 'string'
-    ? JSON.parse(result.penre_mj)?.total
+    ? (() => { try { return JSON.parse(result.penre_mj)?.total } catch { return null } })()
     : result.penre_mj?.total
 
   const fwTotal = typeof result.fw_m3 === 'string'
-    ? JSON.parse(result.fw_m3)?.total
+    ? (() => { try { return JSON.parse(result.fw_m3)?.total } catch { return null } })()
     : result.fw_m3?.total
 
   // Summary cards
@@ -135,7 +135,7 @@ export default function HotspotsPage() {
     {
       icon: faFire,
       label: 'Non-Renewable Energy',
-      value: penreTotal != null ? Number(penreTotal).toFixed(1) : '—',
+      value: penreTotal != null && !isNaN(Number(penreTotal)) ? Number(penreTotal).toFixed(1) : '—',
       unit: 'MJ',
       color: 'text-orange-600',
       bg: 'bg-orange-50',
@@ -143,7 +143,7 @@ export default function HotspotsPage() {
     {
       icon: faWater,
       label: 'Freshwater Use',
-      value: fwTotal != null ? Number(fwTotal).toFixed(3) : '—',
+      value: fwTotal != null && !isNaN(Number(fwTotal)) ? Number(fwTotal).toFixed(3) : '—',
       unit: 'm³',
       color: 'text-blue-600',
       bg: 'bg-blue-50',
@@ -151,7 +151,7 @@ export default function HotspotsPage() {
     {
       icon: faRecycle,
       label: 'Material Recycled',
-      value: result.waste_to_recycling_kg != null ? Number(result.waste_to_recycling_kg).toFixed(1) : '—',
+      value: result.waste_to_recycling_kg != null && !isNaN(Number(result.waste_to_recycling_kg)) ? Number(result.waste_to_recycling_kg).toFixed(1) : '—',
       unit: 'kg',
       color: 'text-purple-600',
       bg: 'bg-purple-50',
@@ -290,8 +290,8 @@ export default function HotspotsPage() {
                       </td>
                       <td className="py-sm px-md font-medium text-ink">{item.material_name}</td>
                       <td className="py-sm px-md text-mute">{item.description}</td>
-                      <td className="py-sm px-md font-mono text-right text-ink">{item.gwp_kg_co2e?.toFixed(4)}</td>
-                      <td className="py-sm px-md font-mono text-right font-bold text-ink">{item.percentage?.toFixed(1)}%</td>
+                      <td className="py-sm px-md font-mono text-right text-ink">{item.gwp_kg_co2e != null ? Number(item.gwp_kg_co2e).toFixed(4) : '—'}</td>
+                      <td className="py-sm px-md font-mono text-right font-bold text-ink">{item.percentage != null ? Number(item.percentage).toFixed(1) : '—'}%</td>
                     </tr>
                   ))}
                 </tbody>

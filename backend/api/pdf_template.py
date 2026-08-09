@@ -91,6 +91,38 @@ def build_epd_html(project: dict, result: dict) -> str:
     inst = project.get("installation") or {}
     bom = project.get("bom") or []
     transport_legs = project.get("transport") or project.get("transport_legs") or []
+    if not transport_legs:
+        t_data = project.get("transportation_data")
+        if isinstance(t_data, str):
+            try:
+                t_data = json.loads(t_data)
+            except Exception:
+                t_data = None
+        if isinstance(t_data, dict):
+            transport_legs = []
+            a4 = t_data.get("a4_segment")
+            if a4 and isinstance(a4, dict):
+                mode = str(a4.get("transport_mode", "heavy_truck")).replace("_", " ").title()
+                dist = float(a4.get("distance_km") or 0)
+                transport_legs.append({
+                    "lc_module": "A4",
+                    "vehicle_type": mode,
+                    "road_distance_km": dist if "ocean" not in mode.lower() else 0,
+                    "ocean_freight_km": dist if "ocean" in mode.lower() else 0,
+                    "capacity_utilization_pct": float(a4.get("capacity_utilization_pct") or 75),
+                })
+            a2s = t_data.get("a2_segments") or []
+            for a2 in a2s:
+                if isinstance(a2, dict):
+                    mode = str(a2.get("transport_mode", "heavy_truck")).replace("_", " ").title()
+                    dist = float(a2.get("distance_km") or 0)
+                    transport_legs.append({
+                        "lc_module": "A2",
+                        "vehicle_type": mode,
+                        "road_distance_km": dist if "ocean" not in mode.lower() else 0,
+                        "ocean_freight_km": dist if "ocean" in mode.lower() else 0,
+                        "capacity_utilization_pct": float(a2.get("capacity_utilization_pct") or 70),
+                    })
     active_modules = project.get("active_modules") or [
         "A1", "A2", "A3", "A4", "A5", "B1", "B6", "C1", "C2", "C3", "C4", "D"
     ]
@@ -163,6 +195,12 @@ def build_epd_html(project: dict, result: dict) -> str:
         .page-break { page-break-before: always; }
         .note-box { background: #f8fafc; border-left: 4px solid #2563eb; padding: 10px 14px; font-size: 8.5pt; margin: 12px 0; }
         .section-header { font-size: 16pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #0f172a; border-bottom: 3px solid #0f172a; padding-bottom: 6px; margin-top: 30px; margin-bottom: 18px; page-break-after: avoid; }
+        .epd-fu-details-table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-bottom: 16px; page-break-inside: avoid; }
+        .epd-fu-details-table th { background-color: #1B2A4A; color: #FFFFFF; padding: 8px 12px; text-align: center; border: 1px solid #cccccc; font-weight: 700; }
+        .epd-a4-transport-table { width: 100%; border-collapse: collapse; font-size: 9pt; margin-bottom: 16px; page-break-inside: avoid; }
+        .epd-a4-transport-table th { background-color: #1B2A4A; color: #FFFFFF; padding: 8px 12px; text-align: left; border: 1px solid #cccccc; font-weight: 700; }
+        .epd-a4-transport-table td { padding: 6px 12px; border: 1px solid #cccccc; text-align: left; }
+        .epd-table-caption { font-weight: 700; font-size: 10pt; color: #0f172a; margin-bottom: 6px; }
     """
 
     hotspots = []
@@ -271,6 +309,7 @@ def build_epd_html(project: dict, result: dict) -> str:
         <div class="page-break"></div>
         <div class="section-header">3. MATERIAL INVENTORY & MANUFACTURING (A1–A3)</div>
 
+        {project.get('material_composition_html') or f'''
         <h3>3.1 Material Composition</h3>
         <p>The product material composition per functional unit ({safe_text(project.get("functional_unit_quantity"))} {safe_text(project.get("functional_unit_unit"))}) is detailed below. Total mass: <strong>{format_number(total_mass, 2)} kg</strong>.</p>
         
@@ -291,8 +330,10 @@ def build_epd_html(project: dict, result: dict) -> str:
                 <td>—</td>
             </tr>
         </table>
+        '''}
 
         <h3>3.2 Manufacturing Process (Module A3)</h3>
+        {project.get('functional_unit_details_html') or ''}
         <p><strong>Supply Chain & Sourcing:</strong> {sourcing_desc}</p>
         <p><strong>Manufacturing & Assembly:</strong> {assembly_desc}</p>
         <p><strong>Production Facility Locations:</strong> {facilities_str}</p>
@@ -308,16 +349,7 @@ def build_epd_html(project: dict, result: dict) -> str:
         <div class="section-header">4. LOGISTICS, INSTALLATION & USE PHASE (A4–B7)</div>
 
         <h3>4.1 Transportation to Site (Module A4)</h3>
-        <table>
-            <tr class="dark-header">
-                <th>Module</th>
-                <th>Vehicle / Transport Mode</th>
-                <th>Road Distance (km)</th>
-                <th>Ocean Freight (km)</th>
-                <th>Capacity Utilization</th>
-            </tr>
-            {"".join(f"<tr><td>{t.get('lc_module', 'A4')}</td><td>{t.get('vehicle_type', 'Heavy truck EURO5')}</td><td>{format_number(t.get('road_distance_km'), 0)} km</td><td>{format_number(t.get('ocean_freight_km'), 0)} km</td><td>{format_number(t.get('capacity_utilization_pct'), 0)}%</td></tr>" for t in transport_legs)}
-        </table>
+        {project.get("a4_transport_html", "")}
 
         <h3>4.2 Installation (Module A5)</h3>
         <table>

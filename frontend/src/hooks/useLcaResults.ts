@@ -53,19 +53,30 @@ export interface JobStatusResponse {
 
 /** Trigger LCA calculation for a project */
 export function useCalculateLca(projectId: string) {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () =>
       api.post<{ job_id: string; run_id: string; status: string }>(
         `/projects/${projectId}/calculate`
       ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lca_results', projectId] })
+    },
   })
 }
 
 /** Poll job status by job_id */
 export function useJobStatus(projectId: string, jobId: string | null, enabled: boolean) {
+  const queryClient = useQueryClient()
   return useQuery<JobStatusResponse>({
     queryKey: ['job_status', projectId, jobId],
-    queryFn: () => api.get<JobStatusResponse>(`/projects/${projectId}/jobs/${jobId}`),
+    queryFn: async () => {
+      const res = await api.get<JobStatusResponse>(`/projects/${projectId}/jobs/${jobId}`)
+      if (res.status === 'complete') {
+        queryClient.invalidateQueries({ queryKey: ['lca_results', projectId] })
+      }
+      return res
+    },
     enabled: enabled && !!jobId,
     refetchInterval: (query) => {
       const status = query.state.data?.status
@@ -82,7 +93,7 @@ export function useLcaResults(projectId: string, enabled = true) {
     queryKey: ['lca_results', projectId],
     queryFn: () => api.get<LcaResultRow>(`/projects/${projectId}/results`),
     enabled: enabled && !!projectId,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 0,
     retry: false,
   })
 }

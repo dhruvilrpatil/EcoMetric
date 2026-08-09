@@ -1,429 +1,570 @@
 /**
  * src/pages/TransportationPage.tsx
  *
- * Transportation Module (EN 15804+A2 Modules A2, A4, C2)
- * Pre-fills A2 rows from BOM materials and calculates logistics carbon emissions.
+ * Transport to Building Site (Module A4)
+ * PCR, ISO 21930 & EN 15804+A2 compliant structured scenario form and live EPD preview.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faTruck, faArrowRight, faArrowLeft, faSave } from '@fortawesome/free-solid-svg-icons'
+import {
+  faTruck,
+  faArrowLeft,
+  faSave,
+  faRobot,
+  faInfoCircle,
+  faExclamationTriangle,
+  faCheckCircle,
+  faSync,
+} from '@fortawesome/free-solid-svg-icons'
 
 import { AppLayout } from '@/components/organisms/AppLayout'
 import { Button } from '@/components/atoms/Button'
-import { BadgeTag } from '@/components/atoms/BadgeTag'
+import { TextInput } from '@/components/atoms/TextInput'
 import { api } from '@/lib/api'
+import { useProject } from '@/hooks/useProjects'
 
-interface TransportSegment {
-  material_name?: string
-  origin_location: string
-  destination_location: string
-  transport_mode: 'heavy_truck' | 'rail' | 'ocean_freight' | 'air_freight'
-  distance_km: number
-  weight_tons: number
-  capacity_utilization_pct: number
+interface TransportScenarioState {
+  vehicle_type: string
+  payload_capacity: number
+  fuel_type: string
+  fuel_efficiency: number
+  road_distance: number
+  ocean_distance: number
+  rail_distance: number
+  air_distance: number
+  product_weight: number
+  gross_density: number
+  capacity_utilization: number
+  capacity_volume_factor: string
 }
 
-interface ModuleTotals {
-  A2: { gwp_total_kgco2e: number }
-  A4: { gwp_total_kgco2e: number }
-  C2: { gwp_total_kgco2e: number }
-}
+const VEHICLE_OPTIONS = [
+  { label: '>32000 kg payload Flatbed Truck', value: '>32000 kg payload Flatbed Truck', payload: 32000, fuel: 36.3, fuelType: 'Diesel' },
+  { label: 'Flatbed Truck (>32 ton)', value: 'Flatbed Truck (>32 ton)', payload: 32000, fuel: 36.3, fuelType: 'Diesel' },
+  { label: 'Heavy Truck', value: 'Heavy Truck', payload: 24000, fuel: 32.0, fuelType: 'Diesel' },
+  { label: 'Medium Truck', value: 'Medium Truck', payload: 12000, fuel: 22.0, fuelType: 'Diesel' },
+  { label: 'Container Truck', value: 'Container Truck', payload: 28000, fuel: 34.5, fuelType: 'Diesel' },
+  { label: 'Rail', value: 'Rail', payload: 500000, fuel: 5.0, fuelType: 'Electric' },
+  { label: 'Ocean Vessel', value: 'Ocean Vessel', payload: 10000000, fuel: 2.5, fuelType: 'LNG' },
+]
 
 export default function TransportationPage() {
-  const { id: projectId } = useParams<{ id: string }>()
+  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const { data: project } = useProject(id)
 
-  const [a2Segments, setA2Segments] = useState<TransportSegment[]>([])
-  const [a4Segment, setA4Segment] = useState<TransportSegment>({
-    origin_location: 'Factory Plant',
-    destination_location: 'Construction Site',
-    transport_mode: 'heavy_truck',
-    distance_km: 150,
-    weight_tons: 1.0,
-    capacity_utilization_pct: 75,
+  const [scenario, setScenario] = useState<TransportScenarioState>({
+    vehicle_type: '>32000 kg payload Flatbed Truck',
+    payload_capacity: 32000,
+    fuel_type: 'Diesel',
+    fuel_efficiency: 36.3,
+    road_distance: 500,
+    ocean_distance: 0,
+    rail_distance: 0,
+    air_distance: 0,
+    product_weight: 15455.7,
+    gross_density: 369,
+    capacity_utilization: 24,
+    capacity_volume_factor: '<1',
   })
-  const [c2Segment, setC2Segment] = useState<TransportSegment>({
-    origin_location: 'Construction Site',
-    destination_location: 'Recycling Facility',
-    transport_mode: 'heavy_truck',
-    distance_km: 50,
-    weight_tons: 1.0,
-    capacity_utilization_pct: 65,
+
+  const [isSaving, setIsSaving] = useState(false)
+  const [isAiLoading, setIsAiLoading] = useState(false)
+  const [aiRationale, setAiRationale] = useState<string | null>(null)
+  const [validationErrors, setValidationErrors] = useState<string[]>([])
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Fetch BOM rows for live weight calculation if needed
+  const { data: bom = [] } = useQuery({
+    queryKey: ['project_bom', id],
+    queryFn: () => api.get<any[]>(`/projects/${id}/bom`),
+    enabled: !!id,
   })
 
-  const [moduleTotals, setModuleTotals] = useState<ModuleTotals | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const calculatedBomWeight = useMemo(() => {
+    return bom.reduce((sum, item) => sum + (Number(item.mass_kg || item.quantity) || 0), 0)
+  }, [bom])
 
+  // Load existing transport scenario
   useEffect(() => {
-    if (!projectId) return
+    if (!id) return
+    api.get<any>(`/projects/${id}/transportation`)
+      .then((data) => {
+        if (data && Object.keys(data).length > 0) {
+          setScenario((prev) => ({
+            ...prev,
+            vehicle_type: data.vehicle_type || prev.vehicle_type,
+            payload_capacity: Number(data.payload_capacity ?? prev.payload_capacity),
+            fuel_type: data.fuel_type || prev.fuel_type,
+            fuel_efficiency: Number(data.fuel_efficiency ?? prev.fuel_efficiency),
+            road_distance: Number(data.road_distance ?? prev.road_distance),
+            ocean_distance: Number(data.ocean_distance ?? prev.ocean_distance),
+            rail_distance: Number(data.rail_distance ?? prev.rail_distance),
+            air_distance: Number(data.air_distance ?? prev.air_distance),
+            product_weight: Number(data.product_weight || calculatedBomWeight || prev.product_weight),
+            gross_density: Number(data.gross_density ?? prev.gross_density),
+            capacity_utilization: Number(data.capacity_utilization ?? prev.capacity_utilization),
+            capacity_volume_factor: data.capacity_volume_factor || prev.capacity_volume_factor,
+          }))
+        }
+      })
+      .catch((err) => console.error('Failed to load transport scenario:', err))
+  }, [id, calculatedBomWeight])
 
-    async function loadData() {
-      try {
-        const stored = await api.get<any>(`/projects/${projectId}/transportation`)
-        if (stored && stored.a2_segments && stored.a2_segments.length > 0) {
-          setA2Segments(stored.a2_segments)
-        } else {
-          await fetchMaterialsAndPrefill()
-        }
-        if (stored && stored.a4_segment) {
-          setA4Segment(stored.a4_segment)
-        }
-        if (stored && stored.c2_segment) {
-          setC2Segment(stored.c2_segment)
-        }
-      } catch {
-        await fetchMaterialsAndPrefill()
-      } finally {
-        setLoading(false)
-      }
+  // Auto update vehicle defaults when Vehicle Type changes
+  const handleVehicleChange = (vType: string) => {
+    const matched = VEHICLE_OPTIONS.find((opt) => opt.value === vType)
+    if (matched) {
+      setScenario((prev) => ({
+        ...prev,
+        vehicle_type: matched.value,
+        payload_capacity: matched.payload,
+        fuel_efficiency: matched.fuel,
+        fuel_type: matched.fuelType,
+      }))
+    } else {
+      setScenario((prev) => ({ ...prev, vehicle_type: vType }))
     }
-
-    async function fetchMaterialsAndPrefill() {
-      try {
-        const materials = await api.get<any[]>(`/projects/${projectId}/materials`)
-        const prefilled: TransportSegment[] = (materials || []).map((mat: any) => ({
-          material_name: mat.material_name,
-          origin_location: 'Supplier Location',
-          destination_location: 'Factory Site',
-          transport_mode: 'heavy_truck',
-          distance_km: 250,
-          weight_tons: mat.quantity_base ? round(mat.quantity_base / 1000, 3) : 0.1,
-          capacity_utilization_pct: 70,
-        }))
-        setA2Segments(prefilled)
-      } catch (err) {
-        console.error('Failed to load project materials', err)
-      }
-    }
-
-    loadData()
-  }, [projectId])
-
-  const updateA2Segment = (index: number, field: keyof TransportSegment, value: any) => {
-    setA2Segments((prev) =>
-      prev.map((seg, i) => (i === index ? { ...seg, [field]: value } : seg))
-    )
   }
 
-  const queryClient = useQueryClient()
+  // Validate form inputs against PCR rules
+  const validateForm = (): string[] => {
+    const errors: string[] = []
+    if (scenario.road_distance < 0) errors.push('Road distance must be ≥ 0 km.')
+    if (scenario.ocean_distance < 0) errors.push('Ocean distance must be ≥ 0 km.')
+    if (scenario.rail_distance < 0) errors.push('Rail distance must be ≥ 0 km.')
+    if (scenario.air_distance < 0) errors.push('Air distance must be ≥ 0 km.')
+    if (scenario.fuel_efficiency <= 0) errors.push('Fuel efficiency must be > 0 L/100 km.')
+    if (scenario.capacity_utilization < 1 || scenario.capacity_utilization > 100) {
+      errors.push('Capacity utilization must be between 1% and 100%.')
+    }
+    if (scenario.product_weight <= 0) errors.push('Product weight must be > 0 kg.')
+    return errors
+  }
 
+  // Save handler
   const handleSave = async () => {
-    if (!projectId) return
-    setSaving(true)
-    setSuccessMessage(null)
+    const errors = validateForm()
+    setValidationErrors(errors)
+    if (errors.length > 0) return
+
+    setIsSaving(true)
+    setSaveSuccess(false)
 
     try {
-      const response = await api.post<{ status: string; module_totals: ModuleTotals }>(
-        `/projects/${projectId}/transportation/save`,
-        {
-          a2_segments: a2Segments,
-          a4_segment: a4Segment,
-          c2_segment: c2Segment,
-        }
-      )
-      setModuleTotals(response.module_totals)
-      queryClient.invalidateQueries({ queryKey: ['project', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['lca_results', projectId] })
-      setSuccessMessage('Transportation data calculated and saved successfully!')
-      setTimeout(() => setSuccessMessage(null), 4000)
-    } catch (err) {
-      console.error('Failed to save transportation data', err)
+      await api.post(`/projects/${id}/transportation/save`, scenario)
+      setSaveSuccess(true)
+      queryClient.invalidateQueries({ queryKey: ['project', id] })
+      setTimeout(() => setSaveSuccess(false), 3000)
+    } catch (err: any) {
+      setValidationErrors([err.message || 'Failed to save transport scenario'])
     } finally {
-      setSaving(false)
+      setIsSaving(false)
     }
   }
 
-  const handleSaveAndContinue = async () => {
-    await handleSave()
-    if (projectId) {
-      navigate(`/projects/${projectId}/calculate`)
+  // AI Suggestion Handler
+  const handleAiSuggest = async () => {
+    setIsAiLoading(true)
+    setAiRationale(null)
+    try {
+      const res = await api.post<any>(`/projects/${id}/transportation/ai-suggest`, {
+        product_weight: scenario.product_weight || calculatedBomWeight,
+      })
+      if (res) {
+        setScenario((prev) => ({
+          ...prev,
+          vehicle_type: res.suggested_vehicle_type || prev.vehicle_type,
+          payload_capacity: res.payload_capacity || prev.payload_capacity,
+          fuel_type: res.suggested_fuel_type || prev.fuel_type,
+          fuel_efficiency: res.suggested_fuel_efficiency || prev.fuel_efficiency,
+          gross_density: res.suggested_gross_density || prev.gross_density,
+          capacity_utilization: res.suggested_capacity_utilization || 24,
+          road_distance: res.suggested_road_distance ?? prev.road_distance,
+          ocean_distance: res.suggested_ocean_distance ?? prev.ocean_distance,
+          capacity_volume_factor: res.suggested_capacity_volume_factor || prev.capacity_volume_factor,
+        }))
+        setAiRationale(res.rationale || 'AI recommendation applied based on product mass and PCR benchmarks.')
+      }
+    } catch (err) {
+      console.error('AI suggest error:', err)
+    } finally {
+      setIsAiLoading(false)
     }
-  }
-
-  const breadcrumbs = [
-    { label: 'Projects', to: '/dashboard' },
-    { label: 'Inventory', to: `/projects/${projectId}/inventory` },
-    { label: 'Transportation' },
-  ]
-
-  const projectNav = {
-    projectId: projectId || 'new',
-    currentStep: 3 as const,
-    highestCompletedStep: 3 as const,
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-canvas flex items-center justify-center">
-        <p className="text-body-md text-mute animate-pulse">Loading Transportation Module...</p>
-      </div>
-    )
   }
 
   return (
-    <AppLayout breadcrumbs={breadcrumbs} projectNav={projectNav}>
-      <div className="w-full max-w-content-max mx-auto px-hero-h py-section space-y-xl">
-        
-        {/* Page Header */}
-        <div className="flex items-center justify-between">
+    <AppLayout
+      breadcrumbs={[
+        { label: 'Projects', to: '/projects' },
+        { label: project?.name || 'Project Details', to: `/projects/${id}` },
+        { label: 'Step 3: Transportation' },
+      ]}
+      projectNav={id ? {
+        projectId: id,
+        currentStep: 3,
+        highestCompletedStep: 3,
+      } : undefined}
+    >
+      <div className="max-w-6xl mx-auto space-y-xl py-md">
+
+        {/* Header Strip */}
+        <div className="flex flex-col tablet:flex-row justify-between items-start tablet:items-center gap-md bg-white p-lg rounded-sm border border-hairline shadow-sm">
           <div>
-            <h1 className="text-heading-lg text-ink font-bold flex items-center gap-sm">
-              <FontAwesomeIcon icon={faTruck} className="text-primary" />
-              Transportation &amp; Freight Logistics (Modules A2, A4, C2)
-            </h1>
-            <p className="text-body-md text-mute mt-xs">
-              Configure transport modes, distances, and payloads for EN 15804+A2 supply chain compliance.
+            <span className="text-caption-sm font-bold uppercase tracking-wider text-primary">Module A4</span>
+            <h1 className="text-heading-md font-bold text-ink">Transport to Building Site Scenario</h1>
+            <p className="text-body-sm text-mute mt-xs">
+              Configure standard-compliant Module A4 logistics for EPD publication (EN 15804+A2 &amp; PCR compliant).
             </p>
           </div>
-          <BadgeTag color="success">EN 15804+A2 Mandatory</BadgeTag>
+          <div className="flex gap-sm">
+            <Button variant="outline" onClick={handleAiSuggest} disabled={isAiLoading}>
+              <FontAwesomeIcon icon={isAiLoading ? faSync : faRobot} className={`mr-xs ${isAiLoading ? 'animate-spin' : 'text-primary'}`} />
+              {isAiLoading ? 'Analyzing...' : 'AI Transport Suggestion'}
+            </Button>
+            <Button variant="primary" onClick={handleSave} disabled={isSaving}>
+              <FontAwesomeIcon icon={faSave} className="mr-xs" />
+              {isSaving ? 'Saving...' : 'Save Scenario'}
+            </Button>
+          </div>
         </div>
 
-        {successMessage && (
-          <div className="bg-surface-soft border-l-4 border-success p-md rounded-sm text-body-sm text-ink font-medium">
-            {successMessage}
+        {/* Alerts & Notifications */}
+        {validationErrors.length > 0 && (
+          <div className="bg-red-50 border border-red-200 text-red-800 p-md rounded-sm space-y-xs">
+            <div className="font-bold flex items-center gap-xs">
+              <FontAwesomeIcon icon={faExclamationTriangle} /> Validation Errors
+            </div>
+            <ul className="list-disc pl-md text-body-sm space-y-xs">
+              {validationErrors.map((err, idx) => (
+                <li key={idx}>{err}</li>
+              ))}
+            </ul>
           </div>
         )}
 
-        {a2Segments.length === 0 && (
-          <div className="bg-amber-50 border border-amber-300 rounded-sm p-md text-amber-900 text-body-sm font-semibold flex items-center gap-sm">
-            <span className="text-lg">⚠️</span>
-            <span>Zero material transportation segments (Module A2) defined. EN 15804+A2 requires documented transport logistics for raw materials or distribution (Module A4).</span>
+        {saveSuccess && (
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-md rounded-sm flex items-center gap-xs font-semibold text-body-sm">
+            <FontAwesomeIcon icon={faCheckCircle} className="text-emerald-600" /> Transport scenario saved successfully!
           </div>
         )}
 
-        {/* Section 1: Module A2 Raw Material Logistics */}
-        <section className="bg-white border border-hairline rounded-sm p-xl shadow-card">
-          <div className="flex items-center justify-between mb-md">
+        {aiRationale && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-900 p-md rounded-sm flex items-start gap-sm text-body-sm">
+            <FontAwesomeIcon icon={faRobot} className="text-primary mt-xs text-lg" />
             <div>
-              <h2 className="text-heading-md font-bold text-ink">Module A2: Material Transport to Factory</h2>
-              <p className="text-body-sm text-mute">
-                Pre-filled from your BOM. Define how raw materials travel from supplier facilities to your manufacturing plant.
+              <span className="font-bold block">AI Recommendation Applied</span>
+              <p>{aiRationale}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Main Grid: Form & Live EPD Preview */}
+        <div className="grid grid-cols-1 desktop:grid-cols-12 gap-xl">
+
+          {/* LEFT: Structured Form (7 Cols) */}
+          <div className="desktop:col-span-7 bg-white border border-hairline rounded-sm p-xl shadow-card space-y-xl">
+
+            {/* SECTION 1: Transport Vehicle */}
+            <div className="space-y-md">
+              <h2 className="text-body-strong font-bold text-ink flex items-center gap-xs border-b border-hairline pb-xs">
+                <FontAwesomeIcon icon={faTruck} className="text-primary" /> Section 1: Transport Vehicle
+              </h2>
+
+              <div className="grid grid-cols-1 tablet:grid-cols-2 gap-md">
+                <div>
+                  <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
+                    Vehicle Type
+                  </label>
+                  <select
+                    value={scenario.vehicle_type}
+                    onChange={(e) => handleVehicleChange(e.target.value)}
+                    className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white font-medium"
+                  >
+                    {VEHICLE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <TextInput
+                    label="Payload Capacity (kg)"
+                    type="number"
+                    value={scenario.payload_capacity}
+                    readOnly
+                    hint="Auto-filled from vehicle type database"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
+                    Fuel Type
+                  </label>
+                  <select
+                    value={scenario.fuel_type}
+                    onChange={(e) => setScenario({ ...scenario, fuel_type: e.target.value })}
+                    className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white font-medium"
+                  >
+                    <option value="Diesel">Diesel</option>
+                    <option value="Petrol">Petrol</option>
+                    <option value="LNG">LNG</option>
+                    <option value="Electric">Electric</option>
+                  </select>
+                </div>
+
+                <div>
+                  <TextInput
+                    label="Fuel Efficiency (L/100 km)"
+                    type="number"
+                    step="0.1"
+                    value={scenario.fuel_efficiency}
+                    onChange={(e) => setScenario({ ...scenario, fuel_efficiency: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 2: Transport Distances */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h2 className="text-body-strong font-bold text-ink border-b border-hairline pb-xs">
+                Section 2: Transport Distances
+              </h2>
+              <p className="text-caption-sm text-mute">
+                Enter distances for active logistics legs. Zero-distance modes are omitted from published EPD tables.
               </p>
+
+              <div className="grid grid-cols-1 tablet:grid-cols-2 gap-md">
+                <TextInput
+                  label="Road Distance (km)"
+                  type="number"
+                  value={scenario.road_distance}
+                  onChange={(e) => setScenario({ ...scenario, road_distance: parseFloat(e.target.value) || 0 })}
+                />
+
+                <TextInput
+                  label="Ocean Freight Distance (km)"
+                  type="number"
+                  value={scenario.ocean_distance}
+                  onChange={(e) => setScenario({ ...scenario, ocean_distance: parseFloat(e.target.value) || 0 })}
+                />
+
+                <TextInput
+                  label="Rail Freight Distance (km)"
+                  type="number"
+                  value={scenario.rail_distance}
+                  onChange={(e) => setScenario({ ...scenario, rail_distance: parseFloat(e.target.value) || 0 })}
+                />
+
+                <TextInput
+                  label="Air Freight Distance (km)"
+                  type="number"
+                  value={scenario.air_distance}
+                  onChange={(e) => setScenario({ ...scenario, air_distance: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
             </div>
-            <span className="text-caption-sm font-semibold text-stone bg-surface-soft px-sm py-xs rounded-sm">
-              {a2Segments.length} BOM Materials
-            </span>
+
+            {/* SECTION 3: Product Information */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h2 className="text-body-strong font-bold text-ink border-b border-hairline pb-xs">
+                Section 3: Product Information (Auto-Loaded)
+              </h2>
+              <div className="bg-surface-soft p-md rounded-sm grid grid-cols-1 tablet:grid-cols-2 gap-md">
+                <div>
+                  <span className="text-caption-sm text-mute block font-medium">Product Weight</span>
+                  <span className="text-heading-sm font-bold text-ink font-mono">{scenario.product_weight.toFixed(1)} kg</span>
+                  <p className="text-caption-sm text-mute mt-xs">Auto-synced from Product Setup / BOM</p>
+                </div>
+
+                <div>
+                  <span className="text-caption-sm text-mute block font-medium">Functional Unit</span>
+                  <span className="text-body-strong font-semibold text-ink">
+                    {project?.functional_unit_quantity || 1} {project?.functional_unit_unit || 'unit'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 4: Capacity Utilization */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h2 className="text-body-strong font-bold text-ink border-b border-hairline pb-xs">
+                Section 4: Capacity Utilization
+              </h2>
+              <div className="max-w-md">
+                <TextInput
+                  label="Capacity Utilization (%)"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={scenario.capacity_utilization}
+                  onChange={(e) => setScenario({ ...scenario, capacity_utilization: Math.min(100, Math.max(1, parseFloat(e.target.value) || 1)) })}
+                  hint="Percentage of vehicle payload occupied by the transported product (Default: 24%)."
+                />
+              </div>
+            </div>
+
+            {/* SECTION 5: Gross Density */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h2 className="text-body-strong font-bold text-ink border-b border-hairline pb-xs">
+                Section 5: Gross Density
+              </h2>
+              <div className="max-w-md">
+                <TextInput
+                  label="Gross Density of Products Transported (kg/m³)"
+                  type="number"
+                  value={scenario.gross_density}
+                  onChange={(e) => setScenario({ ...scenario, gross_density: parseFloat(e.target.value) || 0 })}
+                  hint="Auto-calculated or manually overridden per product package specifications."
+                />
+              </div>
+            </div>
+
+            {/* SECTION 6: Capacity Utilization Volume Factor */}
+            <div className="space-y-md border-t border-hairline pt-md">
+              <h2 className="text-body-strong font-bold text-ink border-b border-hairline pb-xs">
+                Section 6: Capacity Utilization Volume Factor
+              </h2>
+              <div className="max-w-md">
+                <label className="text-body-strong text-ink block mb-xs text-body-sm font-semibold">
+                  Capacity Volume Factor
+                </label>
+                <select
+                  value={scenario.capacity_volume_factor}
+                  onChange={(e) => setScenario({ ...scenario, capacity_volume_factor: e.target.value })}
+                  className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white font-medium"
+                >
+                  <option value="<1">&lt;1 (Volume constrained before mass limit)</option>
+                  <option value="1">1 (Mass and volume limits reached simultaneously)</option>
+                  <option value=">1">&gt;1 (Mass constrained before volume limit)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Form Action Footer */}
+            <div className="flex justify-between items-center pt-md border-t border-hairline">
+              <Button variant="outline" onClick={() => navigate(`/projects/${id}/inventory`)}>
+                <FontAwesomeIcon icon={faArrowLeft} className="mr-xs" /> Back to Inventory
+              </Button>
+              <Button variant="primary" onClick={handleSave} disabled={isSaving}>
+                <FontAwesomeIcon icon={faSave} className="mr-xs" /> Save &amp; Continue
+              </Button>
+            </div>
+
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-body-sm border-collapse">
-              <thead>
-                <tr className="bg-surface-soft border-b border-hairline text-caption-xs uppercase font-bold text-mute">
-                  <th className="p-md">Material</th>
-                  <th className="p-md">Origin</th>
-                  <th className="p-md">Transport Mode</th>
-                  <th className="p-md text-center">Distance (km)</th>
-                  <th className="p-md text-center">Weight (t)</th>
-                  <th className="p-md text-center">Capacity (%)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {a2Segments.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-xl text-center text-mute">
-                      No materials found in BOM. Add materials in Step 2 Inventory first.
-                    </td>
-                  </tr>
-                ) : (
-                  a2Segments.map((seg, idx) => (
-                    <tr key={idx} className="border-b border-hairline hover:bg-surface-soft">
-                      <td className="p-md font-semibold text-ink">{seg.material_name || `Item ${idx+1}`}</td>
-                      <td className="p-md">
-                        <input
-                          type="text"
-                          value={seg.origin_location}
-                          onChange={(e) => updateA2Segment(idx, 'origin_location', e.target.value)}
-                          placeholder="e.g. Duisburg, DE"
-                          className="w-full border border-hairline rounded-sm p-xs text-body-sm"
-                        />
-                      </td>
-                      <td className="p-md">
-                        <select
-                          value={seg.transport_mode}
-                          onChange={(e) => updateA2Segment(idx, 'transport_mode', e.target.value as any)}
-                          className="w-full border border-hairline rounded-sm p-xs text-body-sm bg-white"
-                        >
-                          <option value="heavy_truck">🚛 Heavy Truck (Lorry &gt;32t)</option>
-                          <option value="rail">🚆 Freight Rail</option>
-                          <option value="ocean_freight">🚢 Ocean Container Vessel</option>
-                          <option value="air_freight">✈️ Air Freight (Intercontinental)</option>
-                        </select>
-                      </td>
-                      <td className="p-md text-center">
-                        <input
-                          type="number"
-                          value={seg.distance_km}
-                          onChange={(e) => updateA2Segment(idx, 'distance_km', parseFloat(e.target.value) || 0)}
-                          className="w-24 border border-hairline rounded-sm p-xs text-center font-mono"
-                        />
-                      </td>
-                      <td className="p-md text-center">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={seg.weight_tons}
-                          onChange={(e) => updateA2Segment(idx, 'weight_tons', parseFloat(e.target.value) || 0)}
-                          className="w-20 border border-hairline rounded-sm p-xs text-center font-mono"
-                        />
-                      </td>
-                      <td className="p-md text-center">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={seg.capacity_utilization_pct}
-                          onChange={(e) => updateA2Segment(idx, 'capacity_utilization_pct', parseFloat(e.target.value) || 0)}
-                          className="w-16 border border-hairline rounded-sm p-xs text-center font-mono"
-                        />
-                      </td>
+          {/* RIGHT: Certified EPD Report Preview (5 Cols) */}
+          <div className="desktop:col-span-5 space-y-md">
+            <div className="bg-white border border-hairline rounded-sm p-lg shadow-card sticky top-6 space-y-md">
+
+              <div className="flex items-center justify-between border-b border-hairline pb-sm">
+                <h3 className="text-body-strong font-bold text-ink flex items-center gap-xs">
+                  <FontAwesomeIcon icon={faInfoCircle} className="text-primary" /> EPD Table Preview
+                </h3>
+                <span className="text-caption-sm bg-blue-50 text-blue-800 font-semibold px-xs py-0.5 rounded">
+                  PCR Compliant
+                </span>
+              </div>
+
+              <p className="text-caption-sm text-mute">
+                Live rendering of Section 4.1 in published EPD reports (Carrier / Daikin / UL Solutions format):
+              </p>
+
+              {/* Styled EPD Table matching PDF output */}
+              <div className="border border-hairline rounded-sm overflow-hidden text-body-sm shadow-xs">
+                <div className="bg-[#1B2A4A] text-white p-xs font-bold text-caption-sm text-center">
+                  Table: Transport to Building Site (A4) per Functional Unit
+                </div>
+                <table className="w-full text-left text-body-sm border-collapse">
+                  <thead>
+                    <tr className="bg-[#1B2A4A] text-white border-b border-hairline text-caption-sm">
+                      <th className="p-sm font-bold border-r border-hairline/20">Parameter</th>
+                      <th className="p-sm font-bold border-r border-hairline/20">Value</th>
+                      <th className="p-sm font-bold">Unit</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                  </thead>
+                  <tbody className="divide-y divide-hairline font-sans text-caption-sm text-ink">
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Vehicle Type</td>
+                      <td className="p-sm font-mono">{scenario.vehicle_type}</td>
+                      <td className="p-sm text-mute">—</td>
+                    </tr>
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Product Weight</td>
+                      <td className="p-sm font-mono">{scenario.product_weight.toFixed(1)}</td>
+                      <td className="p-sm text-mute">kg</td>
+                    </tr>
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Fuel Efficiency</td>
+                      <td className="p-sm font-mono">{scenario.fuel_efficiency.toFixed(1)}</td>
+                      <td className="p-sm text-mute">L/100 km</td>
+                    </tr>
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Fuel Type</td>
+                      <td className="p-sm font-mono">{scenario.fuel_type}</td>
+                      <td className="p-sm text-mute">—</td>
+                    </tr>
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Distance</td>
+                      <td className="p-sm font-mono">{scenario.road_distance.toFixed(0)}</td>
+                      <td className="p-sm text-mute">km</td>
+                    </tr>
 
-        {/* Section 2: Module A4 Product Distribution */}
-        <section className="bg-white border border-hairline rounded-sm p-xl shadow-card">
-          <h2 className="text-heading-md font-bold text-ink mb-xs">Module A4: Finished Product Distribution</h2>
-          <p className="text-body-sm text-mute mb-lg">
-            Specify freight parameters for delivering finished products from factory gate to installation site.
-          </p>
+                    {scenario.ocean_distance > 0 && (
+                      <tr className="hover:bg-surface-soft">
+                        <td className="p-sm font-medium">Additional Ocean Freight Distance</td>
+                        <td className="p-sm font-mono">{scenario.ocean_distance.toFixed(0)}</td>
+                        <td className="p-sm text-mute">km</td>
+                      </tr>
+                    )}
 
-          <div className="grid grid-cols-1 tablet:grid-cols-3 gap-lg">
-            <div>
-              <label className="block text-caption-xs font-bold uppercase text-mute mb-xs">Origin (Factory)</label>
-              <input
-                type="text"
-                value={a4Segment.origin_location}
-                onChange={(e) => setA4Segment({ ...a4Segment, origin_location: e.target.value })}
-                className="w-full border border-hairline rounded-sm p-sm text-body-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-caption-xs font-bold uppercase text-mute mb-xs">Destination (Installation Site)</label>
-              <input
-                type="text"
-                value={a4Segment.destination_location}
-                onChange={(e) => setA4Segment({ ...a4Segment, destination_location: e.target.value })}
-                className="w-full border border-hairline rounded-sm p-sm text-body-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-caption-xs font-bold uppercase text-mute mb-xs">Transport Mode</label>
-              <select
-                value={a4Segment.transport_mode}
-                onChange={(e) => setA4Segment({ ...a4Segment, transport_mode: e.target.value as any })}
-                className="w-full border border-hairline rounded-sm p-sm text-body-sm bg-white"
-              >
-                <option value="heavy_truck">🚛 Heavy Truck (Lorry &gt;32t EURO6)</option>
-                <option value="rail">🚆 Freight Rail</option>
-                <option value="ocean_freight">🚢 Ocean Cargo Vessel</option>
-                <option value="air_freight">✈️ Air Freight (Long Haul)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-caption-xs font-bold uppercase text-mute mb-xs">Distance (km)</label>
-              <input
-                type="number"
-                value={a4Segment.distance_km}
-                onChange={(e) => setA4Segment({ ...a4Segment, distance_km: parseFloat(e.target.value) || 0 })}
-                className="w-full border border-hairline rounded-sm p-sm text-body-sm font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-caption-xs font-bold uppercase text-mute mb-xs">Total Weight (tons)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={a4Segment.weight_tons}
-                onChange={(e) => setA4Segment({ ...a4Segment, weight_tons: parseFloat(e.target.value) || 0 })}
-                className="w-full border border-hairline rounded-sm p-sm text-body-sm font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-caption-xs font-bold uppercase text-mute mb-xs">
-                Capacity Utilization: {a4Segment.capacity_utilization_pct}%
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={a4Segment.capacity_utilization_pct}
-                onChange={(e) => setA4Segment({ ...a4Segment, capacity_utilization_pct: parseFloat(e.target.value) || 0 })}
-                className="w-full accent-primary mt-sm"
-              />
+                    {scenario.rail_distance > 0 && (
+                      <tr className="hover:bg-surface-soft">
+                        <td className="p-sm font-medium">Additional Rail Freight Distance</td>
+                        <td className="p-sm font-mono">{scenario.rail_distance.toFixed(0)}</td>
+                        <td className="p-sm text-mute">km</td>
+                      </tr>
+                    )}
+
+                    {scenario.air_distance > 0 && (
+                      <tr className="hover:bg-surface-soft">
+                        <td className="p-sm font-medium">Additional Air Freight Distance</td>
+                        <td className="p-sm font-mono">{scenario.air_distance.toFixed(0)}</td>
+                        <td className="p-sm text-mute">km</td>
+                      </tr>
+                    )}
+
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Capacity Utilization</td>
+                      <td className="p-sm font-mono">{scenario.capacity_utilization.toFixed(0)}</td>
+                      <td className="p-sm text-mute">%</td>
+                    </tr>
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Gross Density of Products Transported</td>
+                      <td className="p-sm font-mono">{scenario.gross_density.toFixed(0)}</td>
+                      <td className="p-sm text-mute">kg/m³</td>
+                    </tr>
+                    <tr className="hover:bg-surface-soft">
+                      <td className="p-sm font-medium">Capacity Utilization Volume Factor</td>
+                      <td className="p-sm font-mono">{scenario.capacity_volume_factor}</td>
+                      <td className="p-sm text-mute">—</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
             </div>
           </div>
-        </section>
 
-        {/* Section 3: Live Preview of Calculated Transport Impacts */}
-        {moduleTotals && (
-          <section className="bg-surface-soft border border-hairline rounded-sm p-xl shadow-card">
-            <h3 className="text-heading-sm font-bold text-ink mb-md">Calculated Transport Carbon Footprint (GWP-total)</h3>
-            <div className="grid grid-cols-1 tablet:grid-cols-3 gap-lg">
-              <div className="bg-white p-lg rounded-sm border border-hairline">
-                <span className="text-caption-xs uppercase font-bold text-mute">Module A2 (Raw Materials)</span>
-                <p className="text-heading-lg font-mono font-bold text-primary mt-xs">
-                  {moduleTotals.A2.gwp_total_kgco2e.toFixed(2)} <span className="text-body-sm text-mute">kg CO₂e</span>
-                </p>
-              </div>
-              <div className="bg-white p-lg rounded-sm border border-hairline">
-                <span className="text-caption-xs uppercase font-bold text-mute">Module A4 (Distribution)</span>
-                <p className="text-heading-lg font-mono font-bold text-primary mt-xs">
-                  {moduleTotals.A4.gwp_total_kgco2e.toFixed(2)} <span className="text-body-sm text-mute">kg CO₂e</span>
-                </p>
-              </div>
-              <div className="bg-white p-lg rounded-sm border border-hairline">
-                <span className="text-caption-xs uppercase font-bold text-mute">Module C2 (End-of-Life Transport)</span>
-                <p className="text-heading-lg font-mono font-bold text-primary mt-xs">
-                  {moduleTotals.C2.gwp_total_kgco2e.toFixed(2)} <span className="text-body-sm text-mute">kg CO₂e</span>
-                </p>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Action Controls */}
-        <div className="flex items-center justify-between pt-md">
-          <Button
-            variant="outline"
-            onClick={() => navigate(`/projects/${projectId}/inventory`)}
-          >
-            <FontAwesomeIcon icon={faArrowLeft} className="mr-xs" /> Back to Inventory
-          </Button>
-
-          <div className="flex items-center gap-md">
-            <Button
-              variant="outline"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              <FontAwesomeIcon icon={faSave} className="mr-xs" />
-              {saving ? 'Calculating...' : 'Save Inputs'}
-            </Button>
-
-            <Button
-              variant="primary"
-              onClick={handleSaveAndContinue}
-              disabled={saving}
-            >
-              Save &amp; Continue to Calculate <FontAwesomeIcon icon={faArrowRight} className="ml-xs" />
-            </Button>
-          </div>
         </div>
 
       </div>
     </AppLayout>
   )
-}
-
-function round(val: number, decimals: number) {
-  return Number(Math.round(Number(val + 'e' + decimals)) + 'e-' + decimals)
 }

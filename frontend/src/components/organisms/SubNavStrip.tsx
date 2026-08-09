@@ -29,13 +29,13 @@ export interface SubNavStripProps {
 }
 
 const STEPS: Array<{ step: ProjectStep; label: string; path: string }> = [
-  { step: 1, label: '1. Setup',          path: 'setup' },
-  { step: 2, label: '2. Inventory',      path: 'inventory' },
+  { step: 1, label: '1. Setup', path: 'setup' },
+  { step: 2, label: '2. Inventory', path: 'inventory' },
   { step: 3, label: '3. Transportation', path: 'transportation' },
-  { step: 4, label: '4. Calculate',      path: 'calculate' },
-  { step: 5, label: '5. Hotspots',       path: 'hotspots' },
-  { step: 6, label: '6. Export',         path: 'export' },
-  { step: 7, label: '7. Publish',        path: 'publish' },
+  { step: 4, label: '4. Calculate', path: 'calculate' },
+  { step: 5, label: '5. Hotspots', path: 'hotspots' },
+  { step: 6, label: '6. Export', path: 'export' },
+  { step: 7, label: '7. Publish', path: 'publish' },
 ]
 
 export function SubNavStrip({
@@ -98,13 +98,12 @@ export function SubNavStrip({
           <div className="flex items-center gap-xs px-md py-xs bg-white border border-hairline rounded-sm shadow-xs whitespace-nowrap ml-md">
             <span className="text-caption-sm text-mute uppercase font-semibold">Completeness:</span>
             <span
-              className={`text-body-sm font-bold font-mono ${
-                completeness.scorePct === 100
+              className={`text-body-sm font-bold font-mono ${completeness.scorePct === 100
                   ? 'text-green-600'
                   : completeness.scorePct >= 60
-                  ? 'text-amber-600'
-                  : 'text-red-600'
-              }`}
+                    ? 'text-amber-600'
+                    : 'text-red-600'
+                }`}
             >
               {completeness.scorePct}%
             </span>

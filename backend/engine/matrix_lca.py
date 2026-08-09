@@ -357,3 +357,45 @@ def build_lca_matrices(project_data: dict) -> tuple[NDArray[np.float64], NDArray
 
     return A, B, column_labels
 
+
+def build_a3_manufacturing_rows(manufacturing_data: dict) -> dict:
+    """
+    Convert A3 manufacturing inputs into elementary exchange contributions,
+    to be merged into the B matrix's A3 column alongside existing electricity
+    and material-processing impacts.
+
+    Follows the same pattern as transport_module.py's calculate_segment_impact() —
+    returns a dict of {elementary_flow_name: value}, mergeable into the existing
+    matrix construction without a separate code path.
+    """
+    exchanges = {}
+
+    if manufacturing_data.get('natural_gas_consumption_mj'):
+        exchanges['natural_gas_combustion_mj'] = float(manufacturing_data['natural_gas_consumption_mj'])
+
+    if manufacturing_data.get('diesel_consumption_mj'):
+        exchanges['diesel_combustion_mj'] = float(manufacturing_data['diesel_consumption_mj'])
+
+    if manufacturing_data.get('manufacturing_waste_kg'):
+        exchanges[f"waste_{manufacturing_data.get('manufacturing_waste_disposal_route', 'mixed')}_kg"] = \
+            float(manufacturing_data['manufacturing_waste_kg'])
+
+    if manufacturing_data.get('scrap_generated_kg'):
+        scrap_rate = float(manufacturing_data.get('scrap_recycling_rate_pct', 0)) / 100.0
+        net_scrap_to_waste = float(manufacturing_data['scrap_generated_kg']) * (1.0 - scrap_rate)
+        exchanges['scrap_waste_kg'] = net_scrap_to_waste
+
+    if manufacturing_data.get('process_water_consumption_m3'):
+        exchanges['water_consumption_m3'] = float(manufacturing_data['process_water_consumption_m3'])
+
+    if manufacturing_data.get('compressed_air_energy_mj') and \
+       manufacturing_data.get('compressed_air_already_in_electricity') is False:
+        exchanges['compressed_air_energy_mj'] = float(manufacturing_data['compressed_air_energy_mj'])
+
+    for emission in manufacturing_data.get('process_emissions', []):
+        if isinstance(emission, dict) and emission.get('substance_name') and emission.get('emission_kg'):
+            exchanges[f"process_emission_{emission['substance_name']}_kg"] = float(emission['emission_kg'])
+
+    return exchanges
+
+

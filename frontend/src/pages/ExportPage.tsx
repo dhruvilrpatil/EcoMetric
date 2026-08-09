@@ -24,7 +24,7 @@ export default function ExportPage() {
   const navigate = useNavigate()
   const { data: project } = useProject(id)
   const completeness = auditProjectCompleteness(project)
-  
+
   const [isGeneratingEpd, setIsGeneratingEpd] = useState(false)
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [epdUrl, setEpdUrl] = useState<string | null>(null)
@@ -37,7 +37,7 @@ export default function ExportPage() {
       if (epdUrl) URL.revokeObjectURL(epdUrl)
     }
   }, [epdUrl])
-  
+
   const breadcrumbs = [
     { label: 'Projects', to: '/dashboard' },
     { label: 'Project Setup', to: `/projects/${id}/setup` },
@@ -125,7 +125,7 @@ export default function ExportPage() {
   return (
     <AppLayout breadcrumbs={breadcrumbs} projectNav={projectNav}>
       <div className="w-full max-w-content-max mx-auto px-hero-h py-section">
-        
+
         <div className="flex items-center justify-between mb-xl">
           <div>
             <h1 className="text-heading-lg text-ink">EPD Generation</h1>
@@ -133,8 +133,8 @@ export default function ExportPage() {
               Generate the final, verification-ready documentation package.
             </p>
           </div>
-          <ButtonPrimary 
-            iconRight={faArrowRight} 
+          <ButtonPrimary
+            iconRight={faArrowRight}
             onClick={() => navigate(`/projects/${id}/publish`)}
             disabled={!previewUrl}
           >
@@ -149,10 +149,10 @@ export default function ExportPage() {
         )}
 
         <div className="flex flex-col tablet:flex-row gap-xxl">
-          
+
           {/* Left Column: Actions */}
           <div className="flex-[1.2] flex flex-col gap-lg">
-            
+
             {/* Pre-Export Checklist */}
             <div className="bg-white border border-hairline rounded-sm p-xl">
               <div className="flex items-center justify-between mb-md">
@@ -189,7 +189,7 @@ export default function ExportPage() {
 
             {/* Generation Cards */}
             <div className="grid grid-cols-1 mobile:grid-cols-2 gap-lg">
-              
+
               {/* Public EPD */}
               <div className="bg-white border border-hairline rounded-sm p-xl flex flex-col">
                 <div className="mb-sm">
@@ -209,9 +209,9 @@ export default function ExportPage() {
                     </Button>
                   </div>
                 ) : (
-                  <ButtonPrimary 
-                    iconLeft={isGeneratingEpd ? faSpinner : faFilePdf} 
-                    onClick={handleGenerateEPD} 
+                  <ButtonPrimary
+                    iconLeft={isGeneratingEpd ? faSpinner : faFilePdf}
+                    onClick={handleGenerateEPD}
                     disabled={isGeneratingEpd}
                     fullWidth
                   >
@@ -219,7 +219,7 @@ export default function ExportPage() {
                   </ButtonPrimary>
                 )}
               </div>
-              
+
               {/* Background Report */}
               <div className="bg-white border border-hairline rounded-sm p-xl flex flex-col">
                 <div className="mb-sm">
@@ -229,9 +229,9 @@ export default function ExportPage() {
                 <p className="text-body-sm text-mute flex-1 mb-xl">
                   Comprehensive technical background report detailing modeling choices, cut-off justifications, and primary vs. secondary data percentages.
                 </p>
-                <Button 
-                  variant="outline" 
-                  iconLeft={isGeneratingReport ? faSpinner : faFilePdf} 
+                <Button
+                  variant="outline"
+                  iconLeft={isGeneratingReport ? faSpinner : faFilePdf}
                   onClick={handleGenerateReport}
                   disabled={isGeneratingReport}
                   fullWidth

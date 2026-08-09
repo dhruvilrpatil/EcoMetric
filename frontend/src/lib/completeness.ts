@@ -32,6 +32,12 @@ export function auditProjectCompleteness(project: any): {
     ? (() => { try { return JSON.parse(project.manufacturing_narrative) } catch { return {} } })()
     : project.manufacturing_narrative || {}
 
+  const tData = typeof project.transportation_data === 'string'
+    ? (() => { try { return JSON.parse(project.transportation_data) } catch { return null } })()
+    : project.transportation_data
+
+  const mfg = project.manufacturing || {}
+
   const checks: FieldCheck[] = [
     {
       id: 'product_name',
@@ -82,11 +88,23 @@ export function auditProjectCompleteness(project: any): {
       helpText: 'A3 manufacturing electricity and process specs',
     },
     {
+      id: 'compressed_air_validation',
+      label: 'Compressed Air Double-Counting Prevention',
+      step: 2,
+      stepPath: 'inventory?tab=manufacturing',
+      isComplete: !((mfg.compressed_air_energy_mj || 0) > 0 && !mfg.compressed_air_already_in_electricity),
+      helpText: 'Confirmation that compressed air energy is excluded from electricity',
+    },
+    {
       id: 'transport',
       label: 'Transportation Scenarios',
       step: 3,
       stepPath: 'transportation',
-      isComplete: (Array.isArray(project.transport) && project.transport.length > 0) || (Array.isArray(project.transport_legs) && project.transport_legs.length > 0),
+      isComplete: !!(
+        (Array.isArray(project.transport) && project.transport.length > 0) ||
+        (Array.isArray(project.transport_legs) && project.transport_legs.length > 0) ||
+        (tData && (tData.a4_segment || (Array.isArray(tData.a2_segments) && tData.a2_segments.length > 0)))
+      ),
       helpText: 'A2/A4 vehicle distance and logistics routes',
     },
     {
@@ -105,11 +123,25 @@ export function auditProjectCompleteness(project: any): {
       isComplete: !!(
         project.end_of_life &&
         (Number(project.end_of_life.waste_to_landfill_pct) +
-         Number(project.end_of_life.waste_to_recycling_pct) +
-         Number(project.end_of_life.waste_to_incineration_pct) +
-         Number(project.end_of_life.waste_to_reuse_pct)) > 0
+          Number(project.end_of_life.waste_to_recycling_pct) +
+          Number(project.end_of_life.waste_to_incineration_pct) +
+          Number(project.end_of_life.waste_to_reuse_pct)) > 0
       ),
       helpText: 'C1–C4 waste treatment collection & routing percentages',
+    },
+    {
+      id: 'material_composition_consistency',
+      label: 'Material composition is internally consistent',
+      step: 2,
+      stepPath: 'inventory?tab=bom',
+      isComplete: (() => {
+        const bomItems = Array.isArray(project.bom) ? project.bom : []
+        if (bomItems.length === 0) return false
+        const totalMass = bomItems.reduce((sum: number, item: any) => sum + (Number(item.mass_kg || item.quantity) || 0), 0)
+        if (totalMass <= 0) return false
+        return bomItems.every((item: any) => (Number(item.mass_kg || item.quantity) || 0) > 0)
+      })(),
+      helpText: 'All material composition rows have positive mass and valid percentage totals',
     },
     {
       id: 'lca_calculation',

@@ -14,21 +14,21 @@ import { setUser } from '@/store/authSlice'
 import type { UserProfile } from '@/types'
 
 // ── Lazy-load all page components ──────────────────────────────────
-const LandingPage       = lazy(() => import('@/pages/LandingPage'))
-const LoginPage         = lazy(() => import('@/pages/LoginPage'))
-const RegisterPage      = lazy(() => import('@/pages/RegisterPage'))
-const DashboardPage     = lazy(() => import('@/pages/DashboardPage'))
-const ProjectSetupPage  = lazy(() => import('@/pages/ProjectSetupPage'))
-const InventoryPage     = lazy(() => import('@/pages/InventoryPage'))
+const LandingPage = lazy(() => import('@/pages/LandingPage'))
+const LoginPage = lazy(() => import('@/pages/LoginPage'))
+const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
+const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const ProjectSetupPage = lazy(() => import('@/pages/ProjectSetupPage'))
+const InventoryPage = lazy(() => import('@/pages/InventoryPage'))
 const TransportationPage = lazy(() => import('@/pages/TransportationPage'))
-const CalculatePage     = lazy(() => import('@/pages/CalculatePage'))
-const HotspotsPage      = lazy(() => import('@/pages/HotspotsPage'))
-const ExportPage        = lazy(() => import('@/pages/ExportPage'))
-const PublishPage       = lazy(() => import('@/pages/PublishPage'))
-const PortfolioPage     = lazy(() => import('@/pages/PortfolioPage'))
-const VerifierPage      = lazy(() => import('@/pages/VerifierPage'))
-const SettingsPage      = lazy(() => import('@/pages/SettingsPage'))
-const NotFoundPage      = lazy(() => import('@/pages/NotFoundPage'))
+const CalculatePage = lazy(() => import('@/pages/CalculatePage'))
+const HotspotsPage = lazy(() => import('@/pages/HotspotsPage'))
+const ExportPage = lazy(() => import('@/pages/ExportPage'))
+const PublishPage = lazy(() => import('@/pages/PublishPage'))
+const PortfolioPage = lazy(() => import('@/pages/PortfolioPage'))
+const VerifierPage = lazy(() => import('@/pages/VerifierPage'))
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 // ── React Query client ──────────────────────────────────────────────
 const queryClient = new QueryClient({

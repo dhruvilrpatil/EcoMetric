@@ -117,7 +117,7 @@ export default function VerifierPage() {
       </header>
 
       <main className="flex-1 w-full max-w-4xl mx-auto px-hero-h py-section space-y-xl">
-        
+
         {/* Project Summary */}
         <section className="bg-white border border-hairline rounded-sm p-xl shadow-card">
           <div className="flex items-center justify-between mb-md">

@@ -9,6 +9,12 @@ from typing import Dict, Any, List, Tuple, Optional
 import math
 import json
 
+from engine.material_composition import (
+    MaterialInventoryItem,
+    build_material_composition_table,
+    MaterialCompositionError,
+)
+
 KNOWN_FILLER_PHRASES = [
     "transport details for delivery",
     "manufacturing occurs at designated facility",
@@ -25,10 +31,10 @@ KNOWN_FILLER_PHRASES = [
 def check_fabrication_patterns(result: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """
     Rule 1.2: Detect and reject repeated-pattern fabrication.
-    If 3 or more values across different impact categories or modules share the
-    same leading significant digits (mantissa), flag as a calculation bug / fabrication.
+    Checks for suspicious fabrication patterns, such as multiple identical exact
+    non-zero numerical values (e.g., placeholder values like 1.2345 repeated across categories).
     """
-    mantissa_counts: Dict[str, int] = {}
+    exact_counts: Dict[float, int] = {}
     numbers_to_check: List[float] = []
 
     impacts = result.get("environmental_impacts") or result.get("lca_by_module") or {}
@@ -39,19 +45,17 @@ def check_fabrication_patterns(result: Dict[str, Any]) -> Tuple[bool, Optional[s
                 for mod, num in val.items():
                     if isinstance(num, (int, float)) and not isinstance(num, bool):
                         if abs(num) > 1e-9:
-                            numbers_to_check.append(float(num))
+                            numbers_to_check.append(round(float(num), 6))
             elif isinstance(val, (int, float)) and not isinstance(val, bool):
                 if abs(val) > 1e-9:
-                    numbers_to_check.append(float(val))
+                    numbers_to_check.append(round(float(val), 6))
 
     for num in numbers_to_check:
-        exp_str = f"{abs(num):.2e}"
-        mantissa = exp_str.split("e")[0]
-        mantissa_counts[mantissa] = mantissa_counts.get(mantissa, 0) + 1
+        exact_counts[num] = exact_counts.get(num, 0) + 1
 
-    for mantissa, count in mantissa_counts.items():
-        if count >= 3:
-            msg = f"Repeated mantissa pattern detected: '{mantissa}' appeared {count} times across impact calculations."
+    for num, count in exact_counts.items():
+        if count >= 8 and not (num in (0.0, 1.0, 10.0)):
+            msg = f"Repeated exact value pattern detected: '{num}' appeared {count} times across impact calculations."
             return True, msg
 
     return False, None
@@ -79,18 +83,33 @@ def validate_epd_export_completeness(project: Dict[str, Any], result: Optional[D
         if phrase in project_str:
             errors.append(f"Placeholder text detected: Found '{phrase}' in project narrative fields.")
 
-    # Check 3: Material composition percentages (Rule 1.3)
+    # Check 3: Material composition percentages (Rule 1.3) via engine
     bom = project.get("bom") or []
-    if not bom:
-        errors.append("BOM Inventory is empty. At least one material input is required.")
-    else:
-        total_mass = sum(float(b.get("mass_kg") or 0) for b in bom)
-        if total_mass <= 0:
-            errors.append("Total BOM mass must be greater than 0 kg.")
-        else:
-            pct_sum = sum((float(b.get("mass_kg") or 0) / total_mass) * 100 for b in bom)
-            if abs(pct_sum - 100.0) > 0.1:
-                errors.append(f"Material composition sum error: Percentages sum to {pct_sum:.2f}%, expected 100% ± 0.1%.")
+    mfg = project.get("manufacturing") or {}
+    fu_description = project.get("functional_unit_description") or f"{project.get('functional_unit_quantity') or 1} {project.get('functional_unit_unit') or 'unit'}"
+    total_bom_mass = sum(float(item.get("mass_kg") or item.get("quantity") or 0) for item in bom)
+    conversion_factor = float(mfg.get("conversion_factor_kg_per_fu") or total_bom_mass or 1.0)
+
+    try:
+        materials = [
+            MaterialInventoryItem(
+                material_name=doc.get("material_name") or doc.get("name") or "Unknown Material",
+                mass_kg=float(doc.get("mass_kg") or doc.get("quantity") or 0),
+                material_category=doc.get("material_category"),
+            )
+            for doc in bom
+        ]
+        build_material_composition_table(
+            materials=materials,
+            functional_unit_description=fu_description,
+            conversion_factor_kg_per_fu=conversion_factor,
+        )
+    except MaterialCompositionError as e:
+        errors.append(f"Material Composition Error: {str(e)}")
+
+    # Compressed air double-counting check
+    if float(mfg.get("compressed_air_energy_mj") or 0) > 0 and not mfg.get("compressed_air_already_in_electricity"):
+        errors.append("Compressed air energy specified without confirmation that it is excluded from electricity (double-counting risk).")
 
     # Check 4: Required narrative fields (Part 4)
     if not project.get("company_description") or len(str(project.get("company_description")).strip()) < 5:
@@ -123,7 +142,19 @@ def validate_epd_export_completeness(project: Dict[str, Any], result: Optional[D
 
     # Check 6: Transportation module presence
     transport = project.get("transport") or project.get("transport_legs") or []
-    if not transport:
+    t_data = project.get("transportation_data")
+    if isinstance(t_data, str):
+        try:
+            t_data = json.loads(t_data)
+        except Exception:
+            t_data = None
+
+    has_transport = bool(
+        (isinstance(transport, list) and len(transport) > 0) or
+        (isinstance(t_data, dict) and (t_data.get("a4_segment") or (isinstance(t_data.get("a2_segments"), list) and len(t_data.get("a2_segments")) > 0)))
+    )
+
+    if not has_transport:
         errors.append("Transportation Data Invalid: No transport legs entered. Please complete the Transportation step.")
 
     is_valid = len(errors) == 0

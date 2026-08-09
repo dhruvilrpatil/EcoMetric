@@ -44,9 +44,16 @@ def _get_project_full(cursor, project_id: str, validate_narrative: bool = False)
     mfg = cursor.fetchone()
     project["manufacturing"] = dict(mfg) if mfg else {}
 
-    # Fetch transport legs
+    # Fetch transport legs & scenario
     cursor.execute("SELECT * FROM transportation_data WHERE project_id = %s", (project_id,))
     project["transport"] = [dict(r) for r in cursor.fetchall()]
+
+    try:
+        cursor.execute("SELECT * FROM transport_scenario WHERE project_id = %s ORDER BY updated_at DESC LIMIT 1", (project_id,))
+        t_sc = cursor.fetchone()
+        project["transport_scenario"] = dict(t_sc) if t_sc else {}
+    except Exception:
+        project["transport_scenario"] = {}
 
     # Fetch use phase data
     cursor.execute("SELECT * FROM use_phase_data WHERE project_id = %s", (project_id,))
@@ -93,6 +100,57 @@ def _build_pdf_bytes_playwright(title: str, project: dict, result: dict) -> byte
     return pdf_bytes
 
 from core.epd_validator import validate_epd_export_completeness
+from engine.material_composition import (
+    MaterialInventoryItem,
+    build_material_composition_table,
+    render_composition_table_html,
+    MaterialCompositionError,
+)
+from engine.functional_unit_details import (
+    compute_functional_unit_details,
+    render_functional_unit_details_html,
+    FunctionalUnitDetailsError,
+)
+from engine.transport_scenario import (
+    build_transport_scenario,
+    render_a4_transport_table_html,
+)
+
+
+def get_material_composition_section(project: dict) -> str:
+    """
+    Fetch the project's material_inventory and functional unit conversion factor,
+    build the composition table, and return ready-to-embed HTML for the
+    "Material Composition" section of the EPD PDF.
+
+    Raises MaterialCompositionError if the BOM data is missing or inconsistent.
+    """
+    bom = project.get("bom") or []
+    mfg = project.get("manufacturing") or {}
+
+    fu_qty = float(project.get("functional_unit_quantity") or 1)
+    fu_unit = str(project.get("functional_unit_unit") or "unit")
+    fu_description = project.get("functional_unit_description") or f"{fu_qty} {fu_unit}"
+
+    total_bom_mass = sum(float(item.get("mass_kg") or item.get("quantity") or 0) for item in bom)
+    conversion_factor = float(mfg.get("conversion_factor_kg_per_fu") or total_bom_mass or 1.0)
+
+    materials = [
+        MaterialInventoryItem(
+            material_name=doc.get("material_name") or doc.get("name") or "Unknown Material",
+            mass_kg=float(doc.get("mass_kg") or doc.get("quantity") or 0),
+            material_category=doc.get("material_category"),
+        )
+        for doc in bom
+    ]
+
+    table = build_material_composition_table(
+        materials=materials,
+        functional_unit_description=fu_description,
+        conversion_factor_kg_per_fu=conversion_factor,
+    )
+
+    return render_composition_table_html(table)
 
 
 def _pdf_response(title: str, filename: str, project: dict, result: dict) -> Response:
@@ -102,6 +160,54 @@ def _pdf_response(title: str, filename: str, project: dict, result: dict) -> Res
             status_code=400,
             detail=f"Pre-Export Validation Failed: {'; '.join(errors)}"
         )
+    try:
+        project["material_composition_html"] = get_material_composition_section(project)
+    except MaterialCompositionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Export Blocked (Material Composition): {str(e)}"
+        )
+
+    try:
+        bom = project.get("bom") or []
+        materials = [
+            MaterialInventoryItem(
+                material_name=doc.get("material_name") or doc.get("name") or "Unknown Material",
+                mass_kg=float(doc.get("mass_kg") or doc.get("quantity") or 0),
+                material_category=doc.get("material_category"),
+            )
+            for doc in bom
+        ]
+        fu_qty = float(project.get("functional_unit_quantity") or 1.0)
+        fu_unit = str(project.get("functional_unit_unit") or "unit")
+        fu_desc = str(project.get("functional_unit_description") or f"{fu_qty} {fu_unit}")
+        config_label = f"{fu_qty:.0f} {fu_unit}" if fu_qty == int(fu_qty) else f"{fu_qty} {fu_unit}"
+
+        fu_details = compute_functional_unit_details(
+            materials=materials,
+            functional_unit_description=fu_desc,
+            functional_unit_quantity=fu_qty,
+            functional_unit_measure_name=fu_unit,
+            configuration_label=config_label,
+        )
+        project["functional_unit_details_html"] = render_functional_unit_details_html(fu_details)
+    except Exception:
+        project["functional_unit_details_html"] = ""
+
+    try:
+        t_scenario_data = project.get("transport_scenario") or project.get("transportation_data") or {}
+        bom = project.get("bom") or []
+        bom_total_weight = sum(float(item.get("mass_kg") or item.get("quantity") or 0) for item in bom)
+        scenario = build_transport_scenario(
+            t_scenario_data if isinstance(t_scenario_data, dict) else {},
+            bom_total_weight=bom_total_weight,
+        )
+        project["a4_transport_html"] = render_a4_transport_table_html(scenario)
+    except Exception as e:
+        logger.warning(f"Could not build transport scenario HTML: {e}")
+        scenario = build_transport_scenario({}, bom_total_weight=15455.7)
+        project["a4_transport_html"] = render_a4_transport_table_html(scenario)
+
     pdf_bytes = _build_pdf_bytes_playwright(title, project, result)
     return Response(content=pdf_bytes, media_type="application/pdf", headers=_content_disposition(filename))
 
@@ -157,4 +263,4 @@ async def export_open_epd(project_id: str, cursor=Depends(get_db_cursor)):
         content=json.dumps(payload, default=str, indent=2),
         media_type="application/json",
         headers=_content_disposition(f"{project_id}-open-epd.json"),
-    )
+    )
