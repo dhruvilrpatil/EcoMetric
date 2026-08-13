@@ -44,11 +44,11 @@ def check_fabrication_patterns(result: Dict[str, Any]) -> Tuple[bool, Optional[s
             if isinstance(val, dict):
                 for mod, num in val.items():
                     if isinstance(num, (int, float)) and not isinstance(num, bool):
-                        if abs(num) > 1e-9:
-                            numbers_to_check.append(round(float(num), 6))
+                        if abs(num) >= 0.001:
+                            numbers_to_check.append(round(float(num), 4))
             elif isinstance(val, (int, float)) and not isinstance(val, bool):
-                if abs(val) > 1e-9:
-                    numbers_to_check.append(round(float(val), 6))
+                if abs(val) >= 0.001:
+                    numbers_to_check.append(round(float(val), 4))
 
     for num in numbers_to_check:
         exact_counts[num] = exact_counts.get(num, 0) + 1

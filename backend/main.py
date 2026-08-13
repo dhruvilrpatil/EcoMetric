@@ -141,5 +141,11 @@ api_v1.include_router(nlp_router)
 api_v1.include_router(transportation_router)
 api_v1.include_router(verifier_router)
 
+@api_v1.get("/epd/reference-matrix", tags=["Calculation"])
+async def get_reference_matrix(methodology: Optional[str] = "EN_15804_A2"):
+    """Returns verified Carrier EPD11017 reference matrix (Tables 18-22)."""
+    from engine.lcia_matrix import get_epd11017_reference_matrix
+    return get_epd11017_reference_matrix(methodology or "EN_15804_A2").model_dump()
+
 app.include_router(api_v1)
 

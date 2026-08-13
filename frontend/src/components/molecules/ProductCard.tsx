@@ -13,7 +13,8 @@
 import { CornerSquare } from '@/components/atoms/CornerSquare'
 import { BadgeTag, type BadgeTagColor } from '@/components/atoms/BadgeTag'
 import { ButtonGhost } from '@/components/atoms/Button'
-import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faArrowRight, faTrash } from '@fortawesome/free-solid-svg-icons'
 import type { ProjectStatus, ProjectStep } from '@/types'
 
 // Map PRD project status to badge display text and color
@@ -40,6 +41,8 @@ export interface ProductCardProps {
   currentStep: ProjectStep
   /** Called when "Open Project →" is clicked */
   onOpen: () => void
+  /** Called when "Delete" is clicked */
+  onDelete?: () => void
   className?: string
 }
 
@@ -72,19 +75,33 @@ export function ProductCard({
   status,
   currentStep,
   onOpen,
+  onDelete,
   className = '',
 }: ProductCardProps) {
   return (
-    <article className={`product-card relative ${className}`}>
+    <article className={`product-card relative group ${className}`}>
       {/* PRD: corner-square top-left */}
       <CornerSquare position="top-left" size="sm" />
 
       <div className="flex flex-col gap-lg h-full">
-        {/* Status badge */}
-        <div className="pt-md">
+        {/* Top row: Status badge + Delete button */}
+        <div className="pt-md flex items-center justify-between">
           <BadgeTag color={STATUS_COLOR[status]}>
             {STATUS_LABEL[status]}
           </BadgeTag>
+          {onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete()
+              }}
+              title="Delete project"
+              aria-label={`Delete ${projectName}`}
+              className="text-mute hover:text-error transition-colors p-1.5 rounded-sm hover:bg-error-surface/20"
+            >
+              <FontAwesomeIcon icon={faTrash} className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Project name */}
@@ -114,3 +131,4 @@ export function ProductCard({
     </article>
   )
 }
+

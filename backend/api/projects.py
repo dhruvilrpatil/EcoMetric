@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from core.db import get_db_cursor
 from api.models import ProjectCreateRequest
+from engine.lcia_matrix import build_indicator_matrix, get_epd11017_reference_matrix, LCIAMatrixResponse
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -313,6 +314,47 @@ async def update_project(
 
 
 # ─────────────────────────────────────────────────────────────
+# DELETE /projects/{id} — Delete project and all associated data
+# ─────────────────────────────────────────────────────────────
+
+@router.delete("/{project_id}", status_code=200)
+async def delete_project(
+    project_id: str,
+    cursor=Depends(get_db_cursor),
+):
+    """Delete a project and all associated records across all modules."""
+    cursor.execute("SELECT id FROM projects WHERE id = %s", (project_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Cascade delete all related tables
+    related_tables = [
+        "bom_items",
+        "manufacturing_data",
+        "transportation_data",
+        "transport_scenario",
+        "installation_data",
+        "installation_scenario",
+        "installation_packaging",
+        "installation_materials",
+        "use_phase_data",
+        "end_of_life_data",
+        "lca_results",
+        "nlp_audit_logs",
+        "nlp_feedback",
+    ]
+    for table in related_tables:
+        try:
+            cursor.execute(f"DELETE FROM {table} WHERE project_id = %s", (project_id,))
+        except Exception:
+            pass
+
+    cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+    return {"project_id": project_id, "status": "deleted"}
+
+
+
+# ─────────────────────────────────────────────────────────────
 # GET /projects/{id}/bom — Get BOM items
 # ─────────────────────────────────────────────────────────────
 
@@ -379,9 +421,10 @@ async def add_bom_items(
 async def get_results(
     project_id: str,
     run_id: Optional[str] = None,
+    methodology: Optional[str] = "EN_15804_A2",
     cursor=Depends(get_db_cursor),
 ):
-    """Retrieve the most recent LCA results for a project."""
+    """Retrieve the most recent LCA results for a project, including full LCIA Matrix."""
     sql = "SELECT * FROM lca_results WHERE project_id = %s AND is_final = TRUE"
     params: list = [project_id]
     if run_id:
@@ -393,7 +436,78 @@ async def get_results(
     row = cursor.fetchone()
     if not row:
         return JSONResponse(status_code=200, content=None)
-    return dict(row)
+    
+    res_dict = dict(row)
+
+    # Fetch project context
+    cursor.execute("SELECT * FROM projects WHERE id = %s", (project_id,))
+    p_row = cursor.fetchone()
+    project_dict = dict(p_row) if p_row else {}
+
+    # Fetch BOM items
+    cursor.execute("SELECT material_name, mass_kg, lc_module FROM bom_items WHERE project_id = %s", (project_id,))
+    bom_rows = cursor.fetchall()
+    project_dict["bom"] = [dict(b) for b in bom_rows] if bom_rows else []
+
+    # Fetch parameters (manufacturing, use_phase, end_of_life)
+    cursor.execute("SELECT * FROM manufacturing_data WHERE project_id = %s", (project_id,))
+    mfg = cursor.fetchone()
+    project_dict["manufacturing"] = dict(mfg) if mfg else {}
+
+    cursor.execute("SELECT * FROM use_phase_data WHERE project_id = %s", (project_id,))
+    use = cursor.fetchone()
+    project_dict["use_phase"] = dict(use) if use else {}
+
+    cursor.execute("SELECT * FROM end_of_life_data WHERE project_id = %s", (project_id,))
+    eol = cursor.fetchone()
+    project_dict["end_of_life"] = dict(eol) if eol else {}
+
+    # Generate multi-indicator LCIA matrix
+    matrix = build_indicator_matrix(res_dict, project_dict, methodology or "EN_15804_A2")
+    res_dict["matrix"] = matrix.model_dump()
+
+    return res_dict
+
+
+@router.get("/{project_id}/matrix")
+async def get_project_matrix(
+    project_id: str,
+    methodology: Optional[str] = "EN_15804_A2",
+    cursor=Depends(get_db_cursor),
+):
+    """Retrieve full LCIA Matrix for a project, with fallback to EPD11017 benchmark if uncalculated."""
+    cursor.execute(
+        "SELECT * FROM lca_results WHERE project_id = %s AND is_final = TRUE ORDER BY run_timestamp DESC LIMIT 1",
+        (project_id,)
+    )
+    row = cursor.fetchone()
+    if not row:
+        # Provide verified reference benchmark for preview mode
+        return get_epd11017_reference_matrix(methodology or "EN_15804_A2").model_dump()
+
+    res_dict = dict(row)
+    cursor.execute("SELECT * FROM projects WHERE id = %s", (project_id,))
+    p_row = cursor.fetchone()
+    project_dict = dict(p_row) if p_row else {}
+
+    cursor.execute("SELECT material_name, mass_kg, lc_module FROM bom_items WHERE project_id = %s", (project_id,))
+    bom_rows = cursor.fetchall()
+    project_dict["bom"] = [dict(b) for b in bom_rows] if bom_rows else []
+
+    cursor.execute("SELECT * FROM manufacturing_data WHERE project_id = %s", (project_id,))
+    mfg = cursor.fetchone()
+    project_dict["manufacturing"] = dict(mfg) if mfg else {}
+
+    cursor.execute("SELECT * FROM use_phase_data WHERE project_id = %s", (project_id,))
+    use = cursor.fetchone()
+    project_dict["use_phase"] = dict(use) if use else {}
+
+    cursor.execute("SELECT * FROM end_of_life_data WHERE project_id = %s", (project_id,))
+    eol = cursor.fetchone()
+    project_dict["end_of_life"] = dict(eol) if eol else {}
+
+    matrix = build_indicator_matrix(res_dict, project_dict, methodology or "EN_15804_A2")
+    return matrix.model_dump()
 
 
 # ─────────────────────────────────────────────────────────────

@@ -12,35 +12,60 @@ import { Link } from 'react-router-dom'
 import { AppLayout } from '@/components/organisms/AppLayout'
 import { CalloutStat } from '@/components/molecules/CalloutStat'
 import { BadgeTag } from '@/components/atoms/BadgeTag'
-
-// Mock Data for MVP
-const MOCK_STATS = [
-  { label: 'Total EPDs Published', value: '24', caption: 'Across 5 regions' },
-  { label: 'Expiring < 12 mos', value: '3', caption: 'Requires renewal', color: 'warning' as const },
-  { label: 'Avg Portfolio GWP', value: '412', caption: 'kg CO2e / unit' },
-  { label: 'DPP Registrations', value: '18', caption: 'ESPR Compliant' },
-]
+import { ButtonGhost } from '@/components/atoms/Button'
+import { useProjects, useDeleteProject, type ProjectSummary } from '@/hooks/useProjects'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faTrash, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 
 const DEADLINES = [
   { name: 'ESPR Battery Directive', date: '2027-01-01', days: 156 },
   { name: 'CPR Updates (Construction)', date: '2029-06-01', days: 1068 },
 ]
 
-const MOCK_PRODUCTS = [
-  { id: '1', name: 'AquaEdge 19DV Chiller', standard: 'EN 15804+A2', gwp: 14500.5, status: 'PUBLISHED', expiry: '2029-10-15' },
-  { id: '2', name: 'EcoGlass Double Pane', standard: 'ISO 21930', gwp: 142.3, status: 'IN PROGRESS', expiry: 'N/A' },
-  { id: '3', name: 'Steel Beam H-Profile', standard: 'EN 15804+A2', gwp: 3100.0, status: 'PUBLISHED', expiry: '2027-02-10' },
-  { id: '4', name: 'Concrete Mix C30/37', standard: 'EN 15804+A2', gwp: 285.5, status: 'EXPIRED', expiry: '2025-11-01' },
-]
-
 export default function PortfolioPage() {
-  const [filter, setFilter] = useState<'ALL' | 'PUBLISHED' | 'IN PROGRESS' | 'EXPIRED'>('ALL')
+  const { data: projects = [], isLoading, error } = useProjects()
+  const deleteProjectMutation = useDeleteProject()
+
+  const [filter, setFilter] = useState<'ALL' | 'PUBLISHED' | 'IN PROGRESS' | 'DRAFT'>('ALL')
+  const [projectToDelete, setProjectToDelete] = useState<ProjectSummary | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const breadcrumbs = [
     { label: 'Portfolio' }
   ]
 
-  const filteredProducts = MOCK_PRODUCTS.filter(p => filter === 'ALL' || p.status === filter)
+  const totalPublished = projects.filter(p => p.status === 'published').length
+  const totalInProgress = projects.filter(p => p.status === 'in_progress' || p.status === 'draft').length
+  const gwpProjects = projects.filter(p => p.gwp_total != null)
+  const avgGwp = gwpProjects.length > 0
+    ? (gwpProjects.reduce((s, p) => s + (p.gwp_total || 0), 0) / gwpProjects.length).toFixed(1)
+    : '—'
+
+  const STATS = [
+    { label: 'Total Declarations', value: String(projects.length), caption: 'Across active workspace' },
+    { label: 'Published EPDs', value: String(totalPublished), caption: 'Third-party verified', color: 'primary' as const },
+    { label: 'In Progress', value: String(totalInProgress), caption: 'Pending verification', color: 'warning' as const },
+    { label: 'Avg Portfolio GWP', value: avgGwp, caption: 'kg CO2e / unit' },
+  ]
+
+  const filteredProjects = projects.filter(p => {
+    if (filter === 'ALL') return true
+    if (filter === 'PUBLISHED') return p.status === 'published'
+    if (filter === 'IN PROGRESS') return p.status === 'in_progress'
+    if (filter === 'DRAFT') return p.status === 'draft'
+    return true
+  })
+
+  async function handleConfirmDelete() {
+    if (!projectToDelete) return
+    setDeleteError(null)
+    try {
+      await deleteProjectMutation.mutateAsync(projectToDelete.id)
+      setProjectToDelete(null)
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Failed to delete project. Please try again.')
+    }
+  }
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
@@ -53,7 +78,7 @@ export default function PortfolioPage() {
 
         {/* 4-up Stats */}
         <div className="grid grid-cols-1 mobile:grid-cols-2 desktop-small:grid-cols-4 gap-lg mb-xxl">
-          {MOCK_STATS.map((stat, idx) => (
+          {STATS.map((stat, idx) => (
             <CalloutStat
               key={idx}
               value={stat.value}
@@ -71,7 +96,7 @@ export default function PortfolioPage() {
             <div className="p-md border-b border-hairline bg-surface-soft flex justify-between items-center">
               <h2 className="text-heading-sm text-ink">Product Catalog</h2>
               <div className="flex gap-xs">
-                {['ALL', 'PUBLISHED', 'IN PROGRESS', 'EXPIRED'].map(f => (
+                {['ALL', 'PUBLISHED', 'IN PROGRESS', 'DRAFT'].map(f => (
                   <button 
                     key={f}
                     onClick={() => setFilter(f as any)}
@@ -93,33 +118,58 @@ export default function PortfolioPage() {
                     <th className="p-md text-caption-sm text-mute uppercase font-bold">Standard</th>
                     <th className="p-md text-caption-sm text-mute uppercase font-bold">GWP-total</th>
                     <th className="p-md text-caption-sm text-mute uppercase font-bold">Status</th>
-                    <th className="p-md text-caption-sm text-mute uppercase font-bold">Expiry</th>
+                    <th className="p-md text-caption-sm text-mute uppercase font-bold">Created</th>
                     <th className="p-md text-caption-sm text-mute uppercase font-bold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredProducts.map((p) => (
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={6} className="p-xl text-center text-mute text-body-sm">
+                        Loading portfolio projects...
+                      </td>
+                    </tr>
+                  ) : error ? (
+                    <tr>
+                      <td colSpan={6} className="p-xl text-center text-error text-body-sm">
+                        Could not load portfolio catalog.
+                      </td>
+                    </tr>
+                  ) : filteredProjects.map((p) => (
                     <tr key={p.id} className="border-b border-hairline hover:bg-surface-soft transition-colors">
-                      <td className="p-md text-body-strong text-ink">{p.name}</td>
-                      <td className="p-md text-body-sm text-mute">{p.standard}</td>
-                      <td className="p-md text-body-sm text-ink font-mono">{p.gwp.toLocaleString()}</td>
+                      <td className="p-md text-body-strong text-ink">{p.product_name}</td>
+                      <td className="p-md text-body-sm text-mute">{(p.epd_standard || '').replace(/_/g, ' ')}</td>
+                      <td className="p-md text-body-sm text-ink font-mono">
+                        {p.gwp_total != null ? `${Number(p.gwp_total).toFixed(2)} kg CO₂e` : '—'}
+                      </td>
                       <td className="p-md">
-                        <BadgeTag color={p.status === 'PUBLISHED' ? 'success' : p.status === 'EXPIRED' ? 'error' : 'info'}>
-                          {p.status}
+                        <BadgeTag color={p.status === 'published' ? 'success' : p.status === 'in_progress' ? 'info' : 'default'}>
+                          {(p.status || 'draft').toUpperCase().replace(/_/g, ' ')}
                         </BadgeTag>
                       </td>
-                      <td className="p-md text-body-sm text-mute">{p.expiry}</td>
+                      <td className="p-md text-body-sm text-mute">
+                        {p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}
+                      </td>
                       <td className="p-md text-right">
-                        <Link to={`/projects/${p.id}/export`} className="text-link-blue hover:underline text-body-sm">
-                          Manage
-                        </Link>
+                        <div className="flex items-center justify-end gap-sm">
+                          <Link to={`/projects/${p.id}/inventory`} className="text-link-blue hover:underline text-body-sm font-medium">
+                            Manage
+                          </Link>
+                          <button
+                            onClick={() => setProjectToDelete(p)}
+                            title="Delete project"
+                            className="text-mute hover:text-error transition-colors p-1"
+                          >
+                            <FontAwesomeIcon icon={faTrash} className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
-                  {filteredProducts.length === 0 && (
+                  {!isLoading && filteredProjects.length === 0 && (
                     <tr>
                       <td colSpan={6} className="p-xl text-center text-mute text-body-sm">
-                        No products match the selected filter.
+                        No projects match the selected filter.
                       </td>
                     </tr>
                   )}
@@ -148,6 +198,52 @@ export default function PortfolioPage() {
           </div>
 
         </div>
+
+        {/* Delete Confirmation Modal */}
+        {projectToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-md animate-fade-in">
+            <div className="bg-white border border-hairline rounded-sm shadow-xl max-w-md w-full p-xl flex flex-col gap-lg">
+              <div className="flex items-start gap-md">
+                <div className="w-10 h-10 rounded-full bg-error-surface/30 text-error flex items-center justify-center flex-shrink-0">
+                  <FontAwesomeIcon icon={faTriangleExclamation} className="text-body-lg" />
+                </div>
+                <div className="flex flex-col gap-xxs">
+                  <h3 className="text-heading-sm text-ink">Delete Declaration?</h3>
+                  <p className="text-body-sm text-mute">
+                    Are you sure you want to delete <strong className="text-ink">{projectToDelete.product_name}</strong>? All associated BOM entries, parameters, transportation data, and LCA calculation results will be permanently removed.
+                  </p>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-sm bg-error-surface/20 border border-error/30 text-error text-caption-sm rounded-sm">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="flex justify-end items-center gap-sm pt-sm border-t border-hairline">
+                <ButtonGhost
+                  onClick={() => {
+                    setProjectToDelete(null)
+                    setDeleteError(null)
+                  }}
+                  disabled={deleteProjectMutation.isPending}
+                >
+                  Cancel
+                </ButtonGhost>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deleteProjectMutation.isPending}
+                  className="px-md py-sm bg-error text-white text-body-sm font-semibold rounded-sm hover:bg-error/90 transition-colors flex items-center gap-xs disabled:opacity-50"
+                >
+                  <FontAwesomeIcon icon={faTrash} className="text-caption-sm" />
+                  {deleteProjectMutation.isPending ? 'Deleting...' : 'Delete Project'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </AppLayout>
   )

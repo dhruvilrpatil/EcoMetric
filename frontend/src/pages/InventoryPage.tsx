@@ -27,7 +27,9 @@ import {
   faBolt,
   faPlug,
   faRecycle,
-  faSave
+  faSave,
+  faSearch,
+  faExclamationTriangle
 } from '@fortawesome/free-solid-svg-icons'
 
 import { AppLayout } from '@/components/organisms/AppLayout'
@@ -51,6 +53,8 @@ interface Material {
   lci_dataset_id: string | null
   lci_dataset_name: string
   lci_dataset_geography: string
+  database_version?: string
+  process_type?: string
   data_quality: string
 }
 
@@ -74,10 +78,13 @@ interface NlpCandidate {
   ecoinvent_id: string
   ecoinvent_name: string
   geography: string
+  database_version?: string
   reference_year: number
   gwp_factor: number | null
+  process_type?: string
+  intended_module?: string
   match_confidence: number
-  confidence_components: Record<string, number>
+  confidence_components?: Record<string, number>
 }
 
 interface NlpExtractedMaterial {
@@ -85,9 +92,15 @@ interface NlpExtractedMaterial {
   quantity_base: number
   unit_base: string
   material_category: string
+  component_category?: string
+  intended_context?: string
+  module?: string
+  data_provenance?: string
   confidence_ner: number
   candidates: NlpCandidate[]
   selected_match: NlpCandidate | null
+  match_status?: 'valid_match' | 'low_confidence' | 'not_found'
+  status_message?: string
 }
 
 interface NlpExtractionResponse {
@@ -161,6 +174,7 @@ export default function InventoryPage() {
   const [nlpRawText, setNlpRawText] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [nlpResponse, setNlpResponse] = useState<NlpExtractionResponse | null>(null)
+  const [selectedCandidateMap, setSelectedCandidateMap] = useState<Record<number, NlpCandidate>>({})
   const [nlpFeedback, setNlpFeedback] = useState<Record<number, { status: 'correct' | 'incorrect' | null; notes: string }>>({})
 
   const { data: searchResults = [], isFetching } = useLciSearch(searchQuery)
@@ -248,21 +262,33 @@ export default function InventoryPage() {
     highestCompletedStep: (bom.length > 0 || savedBomRows.length > 0 ? 2 : 1) as any,
   }
 
-  function handleAddMaterial(lci: LCISearchResult | NlpCandidate, customQty = 1, customName?: string) {
+  function handleAddMaterial(
+    lci: LCISearchResult | NlpCandidate,
+    customQty = 1,
+    customName?: string,
+    targetModule: LifecycleModule = 'A1',
+    processType?: string,
+    dbVersion?: string
+  ) {
     const isNlpCand = 'ecoinvent_id' in lci
     const dsId = isNlpCand ? lci.ecoinvent_id : lci.id
     const dsName = isNlpCand ? lci.ecoinvent_name : (lci.name || lci.activity_name || lci.id)
+    const geo = lci.geography ?? 'GLO'
+    const procType = processType || (isNlpCand ? lci.process_type : undefined)
+    const databaseVer = dbVersion || (isNlpCand ? lci.database_version : 'ecoinvent 3.12')
 
     const newMat: Material = {
       id: crypto.randomUUID(),
       project_id: id || '',
-      module: 'A1',
+      module: targetModule,
       name: customName || dsName,
       quantity: customQty,
       unit: 'kg',
       lci_dataset_id: dsId,
       lci_dataset_name: dsName,
-      lci_dataset_geography: lci.geography ?? 'GLO',
+      lci_dataset_geography: geo,
+      database_version: databaseVer,
+      process_type: procType,
       data_quality: 'SECONDARY',
     }
     setBom(prev => [...prev, newMat])
@@ -322,6 +348,7 @@ export default function InventoryPage() {
         file_name: 'bom_upload.txt'
       })
       setNlpResponse(res)
+      setSelectedCandidateMap({})
       setNlpFeedback({})
     } catch (err: any) {
       setSaveError('AI Extraction failed. Please search manually.')
@@ -350,11 +377,27 @@ export default function InventoryPage() {
 
   function addAllNlpMatches() {
     if (!nlpResponse) return
-    nlpResponse.extracted_materials.forEach(mat => {
-      if (mat.selected_match) {
-        handleAddMaterial(mat.selected_match, mat.quantity_base, mat.material_name)
+    let addedCount = 0
+    nlpResponse.extracted_materials.forEach((mat, idx) => {
+      const activeMatch = selectedCandidateMap[idx] || mat.selected_match
+      if (activeMatch && mat.match_status !== 'not_found') {
+        handleAddMaterial(
+          activeMatch,
+          mat.quantity_base,
+          mat.material_name,
+          (mat.module as LifecycleModule) || 'A1',
+          activeMatch.process_type,
+          activeMatch.database_version
+        )
+        addedCount++
       }
     })
+    if (addedCount < nlpResponse.extracted_materials.length) {
+      setSaveSuccess(`Added ${addedCount} matched items to BOM. ${nlpResponse.extracted_materials.length - addedCount} item(s) require manual selection.`)
+    } else {
+      setSaveSuccess(`Added all ${addedCount} verified materials to BOM.`)
+    }
+    setTimeout(() => setSaveSuccess(null), 4000)
   }
 
   const eolSum = endOfLife.waste_to_recycling_pct + endOfLife.waste_to_landfill_pct + endOfLife.waste_to_incineration_pct + endOfLife.waste_to_reuse_pct
@@ -538,104 +581,213 @@ export default function InventoryPage() {
                   <div className="flex-1 overflow-y-auto flex flex-col gap-md">
                     {nlpResponse && (
                       <div className="bg-white border border-hairline p-md rounded-sm">
-                        <div className="flex justify-between items-center mb-md pb-xs border-b border-hairline">
+                        <div className="flex justify-between items-center mb-md pb-xs border-b border-hairline flex-wrap gap-xs">
                           <div>
-                            <h4 className="text-body-strong text-ink">BOM Analysis Report</h4>
+                            <h4 className="text-body-strong text-ink font-bold">BOM Analysis Report</h4>
                             <p className="text-caption-sm text-mute">
-                              Quality score: <span className="font-bold text-green-600">{nlpResponse.extraction_quality_score}%</span>
+                              Extraction Quality: <span className="font-bold text-green-600">{nlpResponse.extraction_quality_score}%</span> · {nlpResponse.extracted_materials.length} material(s) identified
                             </p>
                           </div>
                           <Button variant="outline" size="sm" onClick={addAllNlpMatches} iconLeft={faPlus}>
-                            Add All Matches
+                            Add Verified Items to BOM
                           </Button>
                         </div>
 
                         {nlpResponse.warnings.map((w, idx) => (
-                          <p key={idx} className="text-caption-sm text-orange-700 bg-orange-50 border border-orange-200 p-sm rounded mb-sm">
+                          <p key={idx} className="text-caption-sm text-orange-700 bg-orange-50 border border-orange-200 p-sm rounded mb-sm flex items-center gap-xs">
+                            <FontAwesomeIcon icon={faExclamationTriangle} className="text-orange-600" />
                             {w}
                           </p>
                         ))}
 
                         <div className="flex flex-col gap-md mt-md">
                           {nlpResponse.extracted_materials.map((mat, idx) => {
-                            const topMatch = mat.selected_match
+                            const activeMatch = selectedCandidateMap[idx] || mat.selected_match
                             const feedback = nlpFeedback[idx]
+                            const isFound = !!activeMatch && (mat.match_status !== 'not_found')
+                            const isHighConf = activeMatch && (activeMatch.match_confidence >= 70)
 
                             return (
-                              <div key={idx} className="border border-slate-100 p-md rounded-sm bg-slate-50 flex flex-col gap-sm">
-                                <div className="flex justify-between items-start">
+                              <div key={idx} className="border border-slate-200 p-md rounded-sm bg-slate-50 flex flex-col gap-sm">
+                                {/* Header with Material, Mass, Category, and Status */}
+                                <div className="flex justify-between items-start gap-sm flex-wrap">
                                   <div>
-                                    <h5 className="text-body-strong text-ink font-bold">{mat.material_name}</h5>
-                                    <p className="text-caption-sm text-mute">
-                                      Qty: <span className="font-semibold text-slate-700">{mat.quantity_base} {mat.unit_base}</span> · Category: {mat.material_category}
+                                    <div className="flex items-center gap-xs flex-wrap">
+                                      <h5 className="text-body-strong text-ink font-bold text-[15px]">{mat.material_name}</h5>
+                                      <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono uppercase">
+                                        {mat.data_provenance || 'Extracted'}
+                                      </span>
+                                    </div>
+                                    <p className="text-caption-sm text-mute mt-0.5">
+                                      Qty: <span className="font-semibold text-slate-800">{mat.quantity_base} {mat.unit_base}</span>
+                                      {' · '}Category: <span className="capitalize text-slate-700 font-medium">{mat.material_category}</span>
+                                      {mat.component_category && (
+                                        <span> · Role: <span className="text-slate-600">{mat.component_category}</span></span>
+                                      )}
                                     </p>
                                   </div>
-                                  <span className={`text-[11px] px-lg py-xs rounded font-bold uppercase tracking-wider ${topMatch && topMatch.match_confidence > 75 ? 'bg-green-100 text-green-800' : 'bg-orange-100 text-orange-800'}`}>
-                                    {topMatch ? `${topMatch.match_confidence.toFixed(0)}% Match` : 'No Match'}
-                                  </span>
+
+                                  {/* Compliance & Confidence Status Badge */}
+                                  <div>
+                                    {isFound ? (
+                                      isHighConf ? (
+                                        <span className="text-[11px] px-2.5 py-1 rounded font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1.5 shadow-2xs">
+                                          <span>✓</span> Valid material match ({activeMatch.match_confidence.toFixed(0)}%)
+                                        </span>
+                                      ) : (
+                                        <span className="text-[11px] px-2.5 py-1 rounded font-semibold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                                          <FontAwesomeIcon icon={faExclamationTriangle} className="text-amber-600 text-[10px]" />
+                                          Manual verification recommended ({activeMatch.match_confidence.toFixed(0)}%)
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="text-[11px] px-2.5 py-1 rounded font-semibold bg-red-100 text-red-800 border border-red-300 flex items-center gap-1.5 shadow-2xs">
+                                        <span>❌</span> Dataset not found — manual mapping required
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
 
-                                {topMatch ? (
-                                  <div className="border border-hairline bg-white p-sm rounded text-caption-sm flex flex-col gap-xs">
-                                    <p className="text-slate-800 font-medium">{topMatch.ecoinvent_name}</p>
-                                    <div className="flex justify-between items-center text-mute mt-xs">
-                                      <span>Geo: {topMatch.geography} | Year: {topMatch.reference_year}</span>
-                                      {topMatch.gwp_factor != null && (
-                                        <span className="text-green-700 font-bold">GWP: {topMatch.gwp_factor.toFixed(3)} kg</span>
+                                {/* Dataset Details Box */}
+                                {isFound && activeMatch ? (
+                                  <div className="border border-slate-200 bg-white p-sm rounded text-caption-sm flex flex-col gap-xs shadow-2xs">
+                                    <div className="flex items-start justify-between gap-sm">
+                                      <span className="text-body-strong text-slate-900 font-semibold">{activeMatch.ecoinvent_name}</span>
+                                    </div>
+
+                                    {/* Metadata Badges */}
+                                    <div className="flex flex-wrap gap-xs text-[11px] mt-xs">
+                                      <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-mono border border-blue-200">
+                                        Geo: {activeMatch.geography}
+                                      </span>
+                                      <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-mono border border-indigo-200">
+                                        {activeMatch.database_version || 'ecoinvent 3.12 (cutoff)'}
+                                      </span>
+                                      <span className="bg-teal-50 text-teal-800 px-1.5 py-0.5 rounded border border-teal-200 font-medium">
+                                        {activeMatch.process_type || 'Material Production'}
+                                      </span>
+                                      <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-mono border border-slate-200">
+                                        Module: {mat.module || 'A1'}
+                                      </span>
+                                      {activeMatch.gwp_factor != null && (
+                                        <span className="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded font-semibold border border-emerald-200">
+                                          GWP: {activeMatch.gwp_factor.toFixed(3)} kg CO₂e / {mat.unit_base}
+                                        </span>
                                       )}
                                     </div>
-                                  </div>
-                                ) : (
-                                  <p className="text-caption-sm text-mute">No candidate matches found in database.</p>
-                                )}
 
-                                {topMatch && (
-                                  <div className="flex flex-col gap-xs">
-                                    <div className="flex gap-sm items-center">
-                                      <button
-                                        onClick={() => submitFeedback(idx, 'correct', mat.material_name, topMatch.ecoinvent_id, topMatch.confidence_components)}
-                                        className={`px-lg py-xs rounded border text-caption-sm transition-all ${feedback?.status === 'correct' ? 'bg-green-50 border-green-400 text-green-700 font-bold' : 'border-hairline text-mute hover:bg-slate-100'}`}
-                                      >
-                                        <FontAwesomeIcon icon={faCheck} className="mr-sm text-green-500" />
-                                        Correct Match
-                                      </button>
-                                      <button
-                                        onClick={() => submitFeedback(idx, 'incorrect', mat.material_name, topMatch.ecoinvent_id, topMatch.confidence_components)}
-                                        className={`px-lg py-xs rounded border text-caption-sm transition-all ${feedback?.status === 'incorrect' ? 'bg-red-50 border-red-400 text-red-700 font-bold' : 'border-hairline text-mute hover:bg-slate-100'}`}
-                                      >
-                                        <FontAwesomeIcon icon={faTimes} className="mr-sm text-red-500" />
-                                        Wrong Material
-                                      </button>
-                                    </div>
-
-                                    {feedback?.status === 'incorrect' && (
-                                      <div className="flex gap-sm mt-xs">
-                                        <input
-                                          type="text"
-                                          placeholder="Add notes for retraining"
-                                          value={feedback.notes}
-                                          onChange={(e) => setNlpFeedback(prev => ({
-                                            ...prev,
-                                            [idx]: { ...prev[idx], notes: e.target.value }
-                                          }))}
-                                          className="text-input flex-1 text-caption-sm py-xs px-sm"
-                                        />
-                                        <button
-                                          onClick={() => submitFeedback(idx, 'incorrect', mat.material_name, topMatch.ecoinvent_id, topMatch.confidence_components)}
-                                          className="bg-slate-700 text-white text-caption-sm px-md py-xs rounded font-medium hover:bg-slate-900"
-                                        >
-                                          Log Notes
-                                        </button>
+                                    {/* Disambiguation: Plausible Candidates */}
+                                    {mat.candidates && mat.candidates.length > 1 && (
+                                      <div className="mt-xs pt-xs border-t border-slate-100">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
+                                          Plausible Candidates ({mat.candidates.length}):
+                                        </span>
+                                        <div className="flex flex-col gap-1">
+                                          {mat.candidates.map((cand, candIdx) => {
+                                            const isSelected = cand.ecoinvent_id === activeMatch.ecoinvent_id
+                                            return (
+                                              <button
+                                                key={candIdx}
+                                                type="button"
+                                                onClick={() => setSelectedCandidateMap(prev => ({ ...prev, [idx]: cand }))}
+                                                className={`text-left text-[11px] p-1.5 rounded transition-all flex items-center justify-between gap-sm ${
+                                                  isSelected
+                                                    ? 'bg-primary/10 border border-primary text-primary font-medium'
+                                                    : 'bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700'
+                                                }`}
+                                              >
+                                                <span className="truncate flex-1">{cand.ecoinvent_name}</span>
+                                                <div className="flex items-center gap-1 shrink-0 font-mono text-[10px]">
+                                                  <span className="bg-white/80 px-1 rounded">{cand.geography}</span>
+                                                  <span className="bg-white/80 px-1 rounded">{cand.process_type}</span>
+                                                  <span className="font-semibold text-slate-800">{cand.match_confidence.toFixed(0)}%</span>
+                                                </div>
+                                              </button>
+                                            )
+                                          })}
+                                        </div>
                                       </div>
                                     )}
                                   </div>
+                                ) : (
+                                  <div className="border border-red-200 bg-red-50/50 p-sm rounded text-caption-sm flex flex-col gap-xs">
+                                    <p className="text-red-700">
+                                      No verified material production or procurement dataset was found for <strong className="font-semibold">{mat.material_name}</strong> in the connected database.
+                                    </p>
+                                    <div className="mt-xs">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEntryMode('manual')
+                                          setSearchQuery(mat.material_name)
+                                        }}
+                                        className="bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 text-caption-sm px-md py-xs rounded font-medium shadow-2xs inline-flex items-center gap-xs"
+                                      >
+                                        <FontAwesomeIcon icon={faSearch} />
+                                        Select Dataset Manually
+                                      </button>
+                                    </div>
+                                  </div>
                                 )}
 
-                                {topMatch && (
-                                  <div className="self-end mt-xs">
-                                    <Button variant="outline" size="sm" onClick={() => handleAddMaterial(topMatch, mat.quantity_base, mat.material_name)} iconLeft={faPlus}>
-                                      Add this item
+                                {/* Action Buttons and Active Learning Feedback */}
+                                <div className="flex justify-between items-center mt-xs flex-wrap gap-xs">
+                                  {isFound && activeMatch ? (
+                                    <div className="flex gap-xs items-center">
+                                      <button
+                                        onClick={() => submitFeedback(idx, 'correct', mat.material_name, activeMatch.ecoinvent_id, activeMatch.confidence_components)}
+                                        className={`px-sm py-xs rounded border text-[11px] transition-all ${feedback?.status === 'correct' ? 'bg-green-50 border-green-400 text-green-700 font-bold' : 'border-hairline text-mute hover:bg-slate-100'}`}
+                                      >
+                                        <FontAwesomeIcon icon={faCheck} className="mr-xs text-green-500" />
+                                        Correct Match
+                                      </button>
+                                      <button
+                                        onClick={() => submitFeedback(idx, 'incorrect', mat.material_name, activeMatch.ecoinvent_id, activeMatch.confidence_components)}
+                                        className={`px-sm py-xs rounded border text-[11px] transition-all ${feedback?.status === 'incorrect' ? 'bg-red-50 border-red-400 text-red-700 font-bold' : 'border-hairline text-mute hover:bg-slate-100'}`}
+                                      >
+                                        <FontAwesomeIcon icon={faTimes} className="mr-xs text-red-500" />
+                                        Wrong Material
+                                      </button>
+                                    </div>
+                                  ) : <div />}
+
+                                  {isFound && activeMatch && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleAddMaterial(
+                                        activeMatch,
+                                        mat.quantity_base,
+                                        mat.material_name,
+                                        (mat.module as LifecycleModule) || 'A1',
+                                        activeMatch.process_type,
+                                        activeMatch.database_version
+                                      )}
+                                      iconLeft={faPlus}
+                                    >
+                                      Add to BOM
                                     </Button>
+                                  )}
+                                </div>
+
+                                {feedback?.status === 'incorrect' && isFound && activeMatch && (
+                                  <div className="flex gap-sm mt-xs">
+                                    <input
+                                      type="text"
+                                      placeholder="Add notes for retraining (e.g. requires low-alloyed grade)"
+                                      value={feedback.notes}
+                                      onChange={(e) => setNlpFeedback(prev => ({
+                                        ...prev,
+                                        [idx]: { ...prev[idx], notes: e.target.value }
+                                      }))}
+                                      className="text-input flex-1 text-caption-sm py-xs px-sm"
+                                    />
+                                    <button
+                                      onClick={() => submitFeedback(idx, 'incorrect', mat.material_name, activeMatch.ecoinvent_id, activeMatch.confidence_components)}
+                                      className="bg-slate-700 text-white text-caption-sm px-md py-xs rounded font-medium hover:bg-slate-900"
+                                    >
+                                      Log Notes
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -654,7 +806,7 @@ export default function InventoryPage() {
               <div className="p-md border-b border-hairline bg-surface-soft flex items-center justify-between">
                 <div>
                   <h2 className="text-heading-sm text-ink">Bill of Materials (A1–A3)</h2>
-                  <p className="text-caption-sm text-mute">{bom.length} item{bom.length !== 1 ? 's' : ''}</p>
+                  <p className="text-caption-sm text-mute">{bom.length} item{bom.length !== 1 ? 's' : ''} · Total Mass: {totalBomMass.toLocaleString()} kg</p>
                 </div>
                 <div className="flex gap-sm">
                   <Button variant="outline" onClick={handleSaveAll} disabled={isSavingParams}>
@@ -688,8 +840,21 @@ export default function InventoryPage() {
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="text-body-strong text-ink truncate">{mat.name}</h4>
-                        <p className="text-caption-sm text-mute">{mat.lci_dataset_geography} · {mat.lci_dataset_name.slice(0, 40)}</p>
+                        <h4 className="text-body-strong text-ink truncate font-semibold">{mat.name}</h4>
+                        <p className="text-caption-sm text-slate-700 truncate">{mat.lci_dataset_name}</p>
+                        <div className="flex flex-wrap gap-xs text-[10px] mt-xs">
+                          <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-mono border border-blue-200">
+                            Geo: {mat.lci_dataset_geography}
+                          </span>
+                          {mat.process_type && (
+                            <span className="bg-teal-50 text-teal-800 px-1.5 py-0.5 rounded border border-teal-200 font-medium">
+                              {mat.process_type}
+                            </span>
+                          )}
+                          <span className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-mono border border-indigo-200">
+                            {mat.database_version || 'ecoinvent 3.12'}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex gap-sm items-center shrink-0">
                         <div className="w-[90px]">

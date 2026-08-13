@@ -1,45 +1,71 @@
+"""
+backend/nlp/bom_extractor.py
+
+BOM Information Extraction Engine.
+Extracts material items, physical quantities (strictly in kg), units, categories,
+intended process contexts (A1 raw materials vs A3 manufacturing processes vs C3/C4 EOL),
+and data provenance.
+"""
+
+from __future__ import annotations
 import re
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Category mapping lookup
+DOMAIN_KEYWORDS: Dict[str, Dict[str, str]] = {
+    "steel": {"category": "metals", "component": "structural"},
+    "stainless steel": {"category": "metals", "component": "structural"},
+    "copper": {"category": "metals", "component": "piping / electrical"},
+    "aluminum": {"category": "metals", "component": "structural / heat exchange"},
+    "aluminium": {"category": "metals", "component": "structural / heat exchange"},
+    "brass": {"category": "metals", "component": "fittings"},
+    "iron": {"category": "metals", "component": "structural / casting"},
+    "cast iron": {"category": "metals", "component": "structural / casting"},
+    "polyethylene": {"category": "plastics", "component": "insulation / casing"},
+    "polypropylene": {"category": "plastics", "component": "insulation / casing"},
+    "pvc": {"category": "plastics", "component": "piping / insulation"},
+    "plastic": {"category": "plastics", "component": "casing"},
+    "rubber": {"category": "elastomers", "component": "gaskets / seals"},
+    "elastomer": {"category": "elastomers", "component": "gaskets / seals"},
+    "electronics": {"category": "electronics", "component": "control / electrical"},
+    "electronic": {"category": "electronics", "component": "control / electrical"},
+    "circuit board": {"category": "electronics", "component": "control / electrical"},
+    "pcb": {"category": "electronics", "component": "control / electrical"},
+    "control board": {"category": "electronics", "component": "control / electrical"},
+    "refrigerant": {"category": "refrigerant", "component": "working fluid"},
+    "r-1233zd(e)": {"category": "refrigerant", "component": "working fluid"},
+    "r-1233zd": {"category": "refrigerant", "component": "working fluid"},
+    "r-134a": {"category": "refrigerant", "component": "working fluid"},
+    "r134a": {"category": "refrigerant", "component": "working fluid"},
+    "r-32": {"category": "refrigerant", "component": "working fluid"},
+    "r-410a": {"category": "refrigerant", "component": "working fluid"},
+    "r-22": {"category": "refrigerant", "component": "working fluid"},
+    "concrete": {"category": "mineral", "component": "foundation"},
+    "cement": {"category": "mineral", "component": "foundation"},
+    "glass wool": {"category": "mineral fibers", "component": "thermal insulation"},
+    "mineral wool": {"category": "mineral fibers", "component": "thermal insulation"},
+    "insulation": {"category": "mineral fibers", "component": "thermal insulation"},
+    "glass": {"category": "glass", "component": "panels"},
+    "wood": {"category": "wood", "component": "packaging"},
+    "cardboard": {"category": "paper", "component": "packaging"},
+}
+
 class RobustBOMExtractorWithFallback:
     """
-    Multi-stage extraction with graceful degradation.
-    If NER fails, fall back to regex. If regex fails, return what we have + manual override UX.
+    Multi-stage BOM extraction engine with semantic classification and context awareness.
     """
 
     def __init__(self):
-        # Sample dictionary of common equipment components and standard material mapping categories
-        self.domain_keywords = {
-            "steel": "metals",
-            "copper": "metals",
-            "aluminum": "metals",
-            "aluminium": "metals",
-            "brass": "metals",
-            "iron": "metals",
-            "polyethylene": "plastics",
-            "polypropylene": "plastics",
-            "pvc": "plastics",
-            "plastic": "plastics",
-            "rubber": "elastomers",
-            "refrigerant": "chemicals",
-            "r-410a": "refrigerant",
-            "r-134a": "refrigerant",
-            "r-32": "refrigerant",
-            "r-1234yf": "refrigerant",
-            "concrete": "mineral",
-            "cement": "mineral",
-            "glass": "glass",
-            "insulation": "mineral fibers",
-            "wood": "wood",
-            "cardboard": "paper",
-        }
+        self.domain_keywords = DOMAIN_KEYWORDS
 
-    def extract_materials(self, text: str) -> Dict[str, Any]:
+    def extract_materials(self, text: str, provenance: str = "extracted") -> Dict[str, Any]:
         """
-        Returns structured extraction payload:
+        Extract materials and quantities from raw text.
+        
+        Returns structured payload:
         {
             'extraction_status': 'success' | 'partial' | 'manual_required',
             'extracted_materials': [...],
@@ -49,7 +75,7 @@ class RobustBOMExtractorWithFallback:
             'debug_info': {...}
         }
         """
-        results = {
+        results: Dict[str, Any] = {
             'extraction_status': 'success',
             'extracted_materials': [],
             'warnings': [],
@@ -57,142 +83,202 @@ class RobustBOMExtractorWithFallback:
             'debug_info': {},
         }
 
-        # Stage 1: Try domain NER (dictionary keyword + context parser)
+        if not text or not text.strip():
+            results['extraction_status'] = 'manual_required'
+            results['requires_manual_review'] = True
+            results['warnings'].append("Input text is empty. Please enter or paste BOM data.")
+            results['extraction_quality_score'] = 0
+            return results
+
+        # Stage 1: Domain NER parser
         try:
-            materials_ner = self._extract_via_domain_ner(text)
+            materials_ner = self._extract_via_domain_ner(text, provenance)
             results['extracted_materials'].extend(materials_ner)
             results['debug_info']['stage_1_ner_success'] = True
             results['debug_info']['stage_1_ner_count'] = len(materials_ner)
         except Exception as e:
             logger.warning(f"Domain NER failed: {e}")
             results['debug_info']['stage_1_ner_error'] = str(e)
-            results['warnings'].append("NER extraction encountered an error; falling back to regex.")
+            results['warnings'].append("NER parser encountered an issue; attempting fallback regex parser.")
 
-        # Stage 2: Regex fallback
+        # Stage 2: Fallback regex parser for any non-delimited sentences
         try:
-            materials_regex = self._extract_via_regex(text)
-            existing_keys = {m['material_name'].lower() for m in results['extracted_materials']}
-            new_materials = [m for m in materials_regex if m['material_name'].lower() not in existing_keys]
-            results['extracted_materials'].extend(new_materials)
+            materials_regex = self._extract_via_regex(text, provenance)
+            existing_names = {m['material_name'].lower().strip() for m in results['extracted_materials']}
+            for m in materials_regex:
+                if m['material_name'].lower().strip() not in existing_names:
+                    results['extracted_materials'].append(m)
             results['debug_info']['stage_2_regex_success'] = True
-            results['debug_info']['stage_2_regex_count'] = len(new_materials)
         except Exception as e:
             logger.error(f"Regex extraction failed: {e}")
             results['debug_info']['stage_2_regex_error'] = str(e)
 
-        # Stage 3: Quality assessment
-        if not results['extracted_materials']:
+        # Stage 3: Quality Assessment
+        count = len(results['extracted_materials'])
+        if count == 0:
             results['extraction_status'] = 'manual_required'
             results['requires_manual_review'] = True
             results['warnings'].append(
-                "No materials automatically extracted. Please paste raw text or enter manually."
+                "No materials could be automatically extracted. Please enter items manually."
             )
-        elif len(results['extracted_materials']) < 3:
+            results['extraction_quality_score'] = 0
+        elif count < 3:
             results['extraction_status'] = 'partial'
             results['requires_manual_review'] = True
             results['warnings'].append(
-                f"Only {len(results['extracted_materials'])} material(s) extracted. "
-                "Please verify completeness and add any missing materials manually."
+                f"Extracted {count} material(s). Please review and add any missing materials manually."
             )
-
-        # Compute quality score
-        quality_components = {
-            'material_count': min(len(results['extracted_materials']) / 5, 1.0),  # 5+ materials = 100%
-            'extraction_success_rate': 0.85 if not results['warnings'] else 0.5,
-        }
-        results['extraction_quality_score'] = int(
-            (quality_components['material_count'] * 0.6 + quality_components['extraction_success_rate'] * 0.4) * 100
-        )
+            results['extraction_quality_score'] = min(count * 30, 80)
+        else:
+            results['extraction_status'] = 'success'
+            results['extraction_quality_score'] = 95
 
         return results
 
-    def _extract_via_domain_ner(self, text: str) -> List[Dict[str, Any]]:
-        """Stage 1: Rule-based domain NER simulator matching standard formats."""
-        extracted = []
+    def _determine_context(self, name: str) -> Tuple[str, str]:
+        """
+        Determine the intended process context and lifecycle module.
+        Returns: (intended_context, module)
+        """
+        name_low = name.lower()
+        if any(w in name_low for w in ["welding", "machining", "turning", "milling", "cutting", "drilling", "stamping", "extrusion", "surface treatment"]):
+            return "manufacturing_process", "A3"
+        elif any(w in name_low for w in ["scrap", "waste", "disposal", "recycling", "dismantling", "treatment of"]):
+            return "end_of_life", "C3"
+        elif any(w in name_low for w in ["transport", "freight", "lorry", "truck"]):
+            return "transport", "A4"
+        return "material_procurement", "A1"
+
+    def _extract_via_domain_ner(self, text: str, provenance: str = "extracted") -> List[Dict[str, Any]]:
+        """
+        Stage 1: Line-by-line structured extraction matching standard industrial BOM formats.
+        Examples:
+          - Steel: 5000kg
+          - Copper: 1200 kg
+          - Aluminum: 300kg
+          - Electronics: 50 kg
+          - Refrigerant: R-1233zd(E), 500kg
+          - Refrigerant R-134a - 45 kg
+          - aluminum welding process: 10kg
+        """
+        extracted: List[Dict[str, Any]] = []
         lines = text.split("\n")
-        
-        # Match pattern: [material name/description] ... [qty] [unit]
-        # e.g., "Steel Frame: 450.5 kg" or "Copper tube (A1) - 12 kg"
+
+        # Regex matching item name/spec, delimiter, quantity, and unit
         pattern = re.compile(
-            r"([a-zA-Z\s\-\(\)\/\d]+?)\s*[:\-–—]\s*(\d+(?:\.\d+)?)\s*(kg|g|t|lbs|tons|m3|l|liters|pcs|pieces)",
+            r"^\s*([a-zA-Z0-9\s\-\(\)\/\,\.\+]+?)\s*[:\-–—=]\s*([a-zA-Z0-9\s\-\(\)\/\,\.\+]*?)(\d+(?:[\.,]\d+)?)\s*(kg|g|t|lbs|tons|tonnes|m3|l|liters|pcs|pieces)?\s*$",
             re.IGNORECASE
         )
-        
+
         for line in lines:
-            line = line.strip()
-            if not line:
+            line_str = line.strip()
+            if not line_str or line_str.startswith("#"):
                 continue
-            match = pattern.search(line)
+
+            match = pattern.search(line_str)
             if match:
-                name = match.group(1).strip()
-                qty = float(match.group(2))
-                unit = match.group(3).lower()
+                prefix = match.group(1).strip()
+                middle = match.group(2).strip()
+                qty_raw = match.group(3).replace(",", ".").strip()
+                unit_raw = (match.group(4) or "kg").lower().strip()
 
-                # Clean up unit to standard 'kg' or similar
-                if unit in ['lbs', 'pounds']:
-                    qty = qty * 0.45359237
-                    unit = 'kg'
-                elif unit in ['g', 'grams']:
-                    qty = qty / 1000.0
-                    unit = 'kg'
-                elif unit in ['t', 'tons', 'tonnes']:
-                    qty = qty * 1000.0
-                    unit = 'kg'
+                try:
+                    qty = float(qty_raw)
+                except ValueError:
+                    continue
 
+                # Combine prefix and middle into full item name (e.g. "Refrigerant" + "R-1233zd(E)" -> "Refrigerant R-1233zd(E)")
+                if middle and not middle.isdigit():
+                    full_name = f"{prefix} {middle}".strip().rstrip(",")
+                else:
+                    full_name = prefix.rstrip(",")
+
+                # Standardize units strictly to physical mass in kg
+                unit = "kg"
+                if unit_raw in ['lbs', 'pounds']:
+                    qty = round(qty * 0.45359237, 3)
+                elif unit_raw in ['g', 'grams']:
+                    qty = round(qty / 1000.0, 4)
+                elif unit_raw in ['t', 'tons', 'tonnes']:
+                    qty = round(qty * 1000.0, 2)
+
+                # Determine category and component role
                 category = "other"
-                for kw, cat in self.domain_keywords.items():
-                    if kw in name.lower():
-                        category = cat
+                component_cat = "general"
+                full_name_low = full_name.lower()
+
+                for kw, info in self.domain_keywords.items():
+                    if kw in full_name_low:
+                        category = info["category"]
+                        component_cat = info["component"]
                         break
 
+                intended_context, module = self._determine_context(full_name)
+
                 extracted.append({
-                    "material_name": name,
+                    "material_name": full_name,
                     "quantity_base": qty,
-                    "unit_base": "kg", # Standardize to kg
+                    "unit_base": "kg",
                     "material_category": category,
-                    "confidence_ner": 0.90
+                    "component_category": component_cat,
+                    "intended_context": intended_context,
+                    "module": module,
+                    "data_provenance": provenance,
+                    "confidence_ner": 0.95
                 })
+
         return extracted
 
-    def _extract_via_regex(self, text: str) -> List[Dict[str, Any]]:
-        """Stage 2: Regex fallback to grab quantities and material words anywhere in sentences."""
-        extracted = []
-        # Find any number followed by unit and a word
-        # e.g. "120 kg steel", "5 kg of plastic"
+    def _extract_via_regex(self, text: str, provenance: str = "extracted") -> List[Dict[str, Any]]:
+        """
+        Stage 2: Free-text fallback for inline quantities (e.g. "5000 kg steel", "300 kg of aluminum").
+        """
+        extracted: List[Dict[str, Any]] = []
         pattern = re.compile(
-            r"(\d+(?:\.\d+)?)\s*(kg|g|t|lbs|pcs)\s*(?:of)?\s*([a-zA-Z]{3,20}(?:\s+[a-zA-Z]{3,20})?)",
+            r"(\d+(?:[\.,]\d+)?)\s*(kg|g|t|lbs|tons)\s*(?:of\s+)?([a-zA-Z0-9\s\-\(\)\/\+]{3,35})",
             re.IGNORECASE
         )
-        matches = pattern.findall(text)
-        for qty_str, unit_str, mat_name in matches:
-            qty = float(qty_str)
-            unit = unit_str.lower()
-            name = mat_name.strip()
 
-            if name.lower() in ["the", "and", "for", "with"]:
+        matches = pattern.findall(text)
+        for qty_str, unit_raw, mat_name in matches:
+            name = mat_name.strip().rstrip(".,;:")
+            name_low = name.lower()
+
+            if name_low in ["the", "and", "for", "with", "from", "each", "total"]:
                 continue
 
-            if unit in ['lbs']:
-                qty = qty * 0.45359237
-                unit = 'kg'
-            elif unit in ['g']:
-                qty = qty / 1000.0
-                unit = 'kg'
-            elif unit in ['t']:
-                qty = qty * 1000.0
-                unit = 'kg'
+            try:
+                qty = float(qty_str.replace(",", "."))
+            except ValueError:
+                continue
+
+            if unit_raw.lower() in ['lbs']:
+                qty = round(qty * 0.45359237, 3)
+            elif unit_raw.lower() in ['g']:
+                qty = round(qty / 1000.0, 4)
+            elif unit_raw.lower() in ['t', 'tons']:
+                qty = round(qty * 1000.0, 2)
 
             category = "other"
-            for kw, cat in self.domain_keywords.items():
-                if kw in name.lower():
-                    category = cat
+            component_cat = "general"
+            for kw, info in self.domain_keywords.items():
+                if kw in name_low:
+                    category = info["category"]
+                    component_cat = info["component"]
                     break
+
+            intended_context, module = self._determine_context(name)
 
             extracted.append({
                 "material_name": name,
                 "quantity_base": qty,
                 "unit_base": "kg",
                 "material_category": category,
-                "confidence_ner": 0.65
+                "component_category": component_cat,
+                "intended_context": intended_context,
+                "module": module,
+                "data_provenance": provenance,
+                "confidence_ner": 0.70
             })
+
         return extracted

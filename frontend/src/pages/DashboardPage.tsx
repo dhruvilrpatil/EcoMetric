@@ -4,21 +4,26 @@
  * PRD §6.3 Dashboard — fetches projects from FastAPI /api/v1/projects (AWS RDS).
  */
 
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useProjects } from '@/hooks/useProjects'
+import { useProjects, useDeleteProject, type ProjectSummary } from '@/hooks/useProjects'
 import { useAppSelector } from '@/store'
 
 import { AppLayout } from '@/components/organisms/AppLayout'
 import { CalloutStat } from '@/components/molecules/CalloutStat'
 import { ProductCard } from '@/components/molecules/ProductCard'
-import { ButtonPrimary } from '@/components/atoms/Button'
+import { ButtonPrimary, ButtonGhost } from '@/components/atoms/Button'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPlus } from '@fortawesome/free-solid-svg-icons'
+import { faPlus, faTriangleExclamation, faTrash } from '@fortawesome/free-solid-svg-icons'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { user } = useAppSelector((s) => s.auth)
   const { data: projects = [], isLoading, error } = useProjects()
+  const deleteProjectMutation = useDeleteProject()
+
+  const [projectToDelete, setProjectToDelete] = useState<ProjectSummary | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Derive stats from real data
   const totalDeclarations = projects.length
@@ -42,6 +47,17 @@ export default function DashboardPage() {
   ]
 
   const breadcrumbs = [{ label: 'Projects' }]
+
+  async function handleConfirmDelete() {
+    if (!projectToDelete) return
+    setDeleteError(null)
+    try {
+      await deleteProjectMutation.mutateAsync(projectToDelete.id)
+      setProjectToDelete(null)
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Failed to delete project. Please try again.')
+    }
+  }
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
@@ -98,6 +114,7 @@ export default function DashboardPage() {
                   status={proj.status as any}
                   currentStep={1}
                   onOpen={() => navigate(`/projects/${proj.id}/inventory`)}
+                  onDelete={() => setProjectToDelete(proj)}
                 />
               ))}
             </div>
@@ -118,7 +135,53 @@ export default function DashboardPage() {
           )}
         </div>
 
+        {/* Delete Confirmation Modal */}
+        {projectToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-md animate-fade-in">
+            <div className="bg-white border border-hairline rounded-sm shadow-xl max-w-md w-full p-xl flex flex-col gap-lg">
+              <div className="flex items-start gap-md">
+                <div className="w-10 h-10 rounded-full bg-error-surface/30 text-error flex items-center justify-center flex-shrink-0">
+                  <FontAwesomeIcon icon={faTriangleExclamation} className="text-body-lg" />
+                </div>
+                <div className="flex flex-col gap-xxs">
+                  <h3 className="text-heading-sm text-ink">Delete Declaration?</h3>
+                  <p className="text-body-sm text-mute">
+                    Are you sure you want to delete <strong className="text-ink">{projectToDelete.product_name}</strong>? All associated BOM entries, parameters, transportation data, and LCA calculation results will be permanently removed.
+                  </p>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-sm bg-error-surface/20 border border-error/30 text-error text-caption-sm rounded-sm">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="flex justify-end items-center gap-sm pt-sm border-t border-hairline">
+                <ButtonGhost
+                  onClick={() => {
+                    setProjectToDelete(null)
+                    setDeleteError(null)
+                  }}
+                  disabled={deleteProjectMutation.isPending}
+                >
+                  Cancel
+                </ButtonGhost>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deleteProjectMutation.isPending}
+                  className="px-md py-sm bg-error text-white text-body-sm font-semibold rounded-sm hover:bg-error/90 transition-colors flex items-center gap-xs disabled:opacity-50"
+                >
+                  <FontAwesomeIcon icon={faTrash} className="text-caption-sm" />
+                  {deleteProjectMutation.isPending ? 'Deleting...' : 'Delete Project'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </AppLayout>
   )
 }
+

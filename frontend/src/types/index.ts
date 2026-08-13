@@ -105,6 +105,37 @@ export interface HotspotEntry {
   mass_contribution_pct: number
 }
 
+export type IndicatorCategory = 'core' | 'additional' | 'resource_use' | 'waste_output'
+
+export interface IndicatorRow {
+  code: string
+  name: string
+  unit: string
+  category: IndicatorCategory
+  methodology: string
+  modules: Record<string, number | null>
+  module_flags?: Record<string, string> // e.g. "ND", "MND"
+  total: number
+  source_trace?: Record<string, {
+    inputs?: Record<string, any>
+    data_source?: string
+    formula?: string
+  }>
+}
+
+export interface FunctionalUnitSpec {
+  value: number
+  unit: string
+  type: string
+}
+
+export interface LCIAMatrixResponse {
+  functional_unit: FunctionalUnitSpec
+  methodology: string
+  epd_standard: string
+  indicators: IndicatorRow[]
+}
+
 export interface LCAResult {
   id: string
   project_id: string
@@ -121,6 +152,9 @@ export interface LCAResult {
 
   // Impact results nested by category and module
   impact_results: Record<string, ImpactCategoryResult>
+
+  // Full LCIA Matrix
+  matrix?: LCIAMatrixResponse
 
   // Raw inventory vector g (audit trace)
   inventory_vector: Record<string, number>

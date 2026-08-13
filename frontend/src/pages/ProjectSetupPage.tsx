@@ -1,25 +1,17 @@
-/**
- * src/pages/ProjectSetupPage.tsx
- *
- * PRD §6.4 Step 1: Setup
- * Posts project to FastAPI /api/v1/projects (AWS RDS) instead of Firestore.
- */
-
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+import { faArrowRight, faTrash, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 
-import { useParams } from 'react-router-dom'
 import { useAppSelector } from '@/store'
 import { projectSetupSchema, type ProjectSetupFormData } from '@/lib/schemas'
-import { useCreateProject, useProject, useUpdateProject } from '@/hooks/useProjects'
-import { useEffect } from 'react'
+import { useCreateProject, useProject, useUpdateProject, useDeleteProject } from '@/hooks/useProjects'
 
 import { AppLayout } from '@/components/organisms/AppLayout'
 import { TextInput } from '@/components/atoms/TextInput'
-import { ButtonPrimary } from '@/components/atoms/Button'
+import { ButtonPrimary, ButtonGhost } from '@/components/atoms/Button'
 import { NotificationCard } from '@/components/molecules/NotificationCard'
 import { PillTab } from '@/components/atoms/PillTab'
 
@@ -29,10 +21,13 @@ export default function ProjectSetupPage() {
   const navigate = useNavigate()
   const { user } = useAppSelector((s) => s.auth)
   const [error, setError] = useState<string | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   
   const { data: project, isLoading: projectLoading } = useProject(id)
   const createProject = useCreateProject()
   const updateProject = useUpdateProject(id || '')
+  const deleteProjectMutation = useDeleteProject()
 
   const {
     register,
@@ -137,9 +132,20 @@ export default function ProjectSetupPage() {
     }
   }
 
+  async function handleDeleteProject() {
+    if (!id || isNew) return
+    setDeleteError(null)
+    try {
+      await deleteProjectMutation.mutateAsync(id)
+      navigate('/dashboard')
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Failed to delete project. Please try again.')
+    }
+  }
+
   const breadcrumbs = [
     { label: 'Projects', to: '/dashboard' },
-    { label: 'New Declaration' },
+    { label: isNew ? 'New Declaration' : (project?.product_name || 'Project Setup') },
   ]
 
   const projectNav = {
@@ -387,7 +393,76 @@ export default function ProjectSetupPage() {
             </ButtonPrimary>
           </div>
         </form>
+
+        {/* Danger Zone: Delete Project */}
+        {!isNew && (
+          <div className="mt-xxl bg-white border border-error/30 rounded-sm p-xl flex flex-col gap-md">
+            <div className="flex items-start justify-between gap-md">
+              <div>
+                <h3 className="text-heading-sm text-error">Danger Zone</h3>
+                <p className="text-body-sm text-mute mt-xxs">
+                  Permanently delete this project declaration and all associated BOM, logistics, energy parameters, and LCA calculation results.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="px-md py-sm bg-error/10 text-error hover:bg-error hover:text-white border border-error/30 rounded-sm text-body-sm font-semibold transition-colors flex items-center gap-xs flex-shrink-0"
+              >
+                <FontAwesomeIcon icon={faTrash} />
+                Delete Project
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-md animate-fade-in">
+            <div className="bg-white border border-hairline rounded-sm shadow-xl max-w-md w-full p-xl flex flex-col gap-lg">
+              <div className="flex items-start gap-md">
+                <div className="w-10 h-10 rounded-full bg-error-surface/30 text-error flex items-center justify-center flex-shrink-0">
+                  <FontAwesomeIcon icon={faTriangleExclamation} className="text-body-lg" />
+                </div>
+                <div className="flex flex-col gap-xxs">
+                  <h3 className="text-heading-sm text-ink">Delete Declaration?</h3>
+                  <p className="text-body-sm text-mute">
+                    Are you sure you want to delete <strong className="text-ink">{project?.product_name || 'this project'}</strong>? This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="p-sm bg-error-surface/20 border border-error/30 text-error text-caption-sm rounded-sm">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="flex justify-end items-center gap-sm pt-sm border-t border-hairline">
+                <ButtonGhost
+                  onClick={() => {
+                    setShowDeleteModal(false)
+                    setDeleteError(null)
+                  }}
+                  disabled={deleteProjectMutation.isPending}
+                >
+                  Cancel
+                </ButtonGhost>
+                <button
+                  onClick={handleDeleteProject}
+                  disabled={deleteProjectMutation.isPending}
+                  className="px-md py-sm bg-error text-white text-body-sm font-semibold rounded-sm hover:bg-error/90 transition-colors flex items-center gap-xs disabled:opacity-50"
+                >
+                  <FontAwesomeIcon icon={faTrash} className="text-caption-sm" />
+                  {deleteProjectMutation.isPending ? 'Deleting...' : 'Delete Project'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </AppLayout>
   )
 }
+

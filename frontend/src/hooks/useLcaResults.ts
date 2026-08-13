@@ -7,6 +7,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
+import { LCIAMatrixResponse } from '@/types'
+
 export interface HotspotItem {
   module: string
   material_name: string
@@ -28,6 +30,8 @@ export interface LcaResultRow {
   compliance_summary: Record<string, string> | null
   hotspots?: HotspotItem[] | string | null
   run_timestamp: string
+  // Full LCIA Matrix
+  matrix?: LCIAMatrixResponse
   // Resource use
   penre_mj: Record<string, number> | null
   pere_mj: Record<string, number> | null
@@ -92,6 +96,17 @@ export function useLcaResults(projectId: string, enabled = true) {
   return useQuery<LcaResultRow>({
     queryKey: ['lca_results', projectId],
     queryFn: () => api.get<LcaResultRow>(`/projects/${projectId}/results`),
+    enabled: enabled && !!projectId,
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+/** Fetch full LCIA Matrix (with fallback preview if needed) */
+export function useLciaMatrix(projectId: string, methodology = 'EN_15804_A2', enabled = true) {
+  return useQuery<LCIAMatrixResponse>({
+    queryKey: ['lcia_matrix', projectId, methodology],
+    queryFn: () => api.get<LCIAMatrixResponse>(`/projects/${projectId}/matrix?methodology=${methodology}`),
     enabled: enabled && !!projectId,
     staleTime: 0,
     retry: false,
